@@ -1,0 +1,26 @@
+# Postgres 16 + pgvector, the only container in the stack.
+# Start with: docker compose --env-file .env -f deploy/postgres.compose.yml up -d
+name: desk
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB in .env}
+    # Bound to loopback only; the Beelink reaches the API, never the database.
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5433}:5432"
+    # Named volume: bind mounts onto the Windows filesystem are slow and break fsync guarantees.
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  pgdata:

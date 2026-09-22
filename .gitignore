@@ -1,0 +1,65 @@
+# Secrets and credentials. Only .env.example is committed.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.token
+secrets/
+credentials*.json
+cloudflared/*.json
+deploy/beelink/cloudflared/*.json
+deploy/beelink/cloudflared/cert.pem
+
+# Private planning docs: kept locally, never published to the public repo
+CLAUDE.md
+docs/SPEC.md
+
+# Broker exports, statements and account data
+data/
+exports/
+statements/
+*.csv
+*.xlsx
+*.qfx
+*.ofx
+flex_*.xml
+
+# Database dumps and local volumes
+*.dump
+*.sql.gz
+*.backup
+pgdata/
+
+# Logs (may contain account or position details)
+logs/
+*.log
+
+# Local tool and editor state
+.claude/settings.local.json
+CLAUDE.local.md
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.egg-info/
+build/
+dist/
+
+# Frontend
+web/node_modules/
+web/dist/
