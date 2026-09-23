@@ -4,7 +4,12 @@ Items noted during the build that are out of scope for the phase in which they c
 
 ## Open
 
-- **Remove the temporary dev dashboard (Phase 9).** `/dev` in `desk/api/dev.py` + `dev.html`, the `desk-dev-dashboard` logon task (`deploy/dev/run-dev-dashboard.ps1`: second API on 127.0.0.1:8010 plus an SSH reverse tunnel to the Beelink), and the Beelink containers `desk-dev-caddy` and `desk-dev-tunnel` (`deploy/beelink/dev-dashboard-up.sh`). The quick tunnel's URL changes whenever its container restarts, and it uses basic auth rather than Cloudflare Access; the Phase 9 setup replaces both with a named tunnel behind Access.
+- **Tune briefing and triage prompts (after a week of mornings).** briefing.v1 restates numbers per holding; it should connect them (a holding's move with its sector ETF, a headline, a watch hit). triage.v2 still mislabels some tiers (ORCL called tier 2) and stretches links (IonQ news to NVDA). Review real outputs and bump prompt versions.
+- **Rank event-addition promotions (Phase 2 tuning).** The 10-per-day cap fills first-come with routine 8-Ks and earnings dates; rank candidates by importance and weigh routine 8-Ks below earnings or volume spikes.
+
+- **Plain-English explanations on request (chat, Phase 5 or 9).** Jon wants "explain like I'm five" summaries for any trigger, brief line or number, e.g. what "20-day relative-strength leader" or "3.7 sigma EIA build" means and why it matters. Answer through the chat interface; numbers still come from the artifact's facts, the model only explains.
+
+- **Replace the temporary dev dashboard (Phase 9).** `/dev` in `desk/api/dev.py` + `dev.html` and the `desk-dev-dashboard` logon task (`deploy/dev/run-dev-dashboard.ps1`: second API on 127.0.0.1:8010 plus an SSH reverse tunnel to the Beelink). The public path is already final: `desk.hoistlaboratory.com` through the named Cloudflare tunnel `desk-tunnel` behind Cloudflare Access, with `desk-dev-caddy` on the Beelink (`deploy/beelink/dev-dashboard-up.sh`). Phase 9 swaps what Caddy serves (the built React bundle plus an API proxy) and retires the SSH reverse tunnel in favor of the LAN path in the spec.
 - **Service control without admin (any phase).** Restarting `desk-*` services needs an elevated shell. A one-time `sc sdset` granting the user account start/stop rights on those services would let deploys restart them remotely.
 
 - **shifts table (Phase 2).** `artifacts.shift_id` and `job_runs.shift_id` are plain UUIDs with no foreign key. Add a `shifts` table with the scheduler and a foreign key from both columns.

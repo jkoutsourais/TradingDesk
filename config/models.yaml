@@ -1,5 +1,23 @@
-# Model names live here, never in code. The deep and small roles are added with the
-# phases that first use them (Phase 3 briefing, Phase 2 triage).
+# Model names live here, never in code. Chosen 2026-09-23 from the Ollama library for a
+# 16 GB RTX 5080: the deep model must fit entirely on the GPU, and the GPU cannot hold the
+# deep and small models together, so the scheduler unloads before every shift.
+
+deep:
+  model: gpt-oss:20b
+  num_ctx: 16384
+  temperature: 0.3
+  # gpt-oss reasoning effort: low, medium or high.
+  think: medium
+  # Released explicitly at shift end; this only covers a crashed shift.
+  keep_alive: 20m
+
+small:
+  model: qwen3.5:9b
+  num_ctx: 8192
+  temperature: 0.1
+  think: false
+  # Unloads after 10 idle minutes (CLAUDE.md model rule).
+  keep_alive: 10m
 
 embedding:
   model: nomic-embed-text

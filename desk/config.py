@@ -191,7 +191,18 @@ class EmbeddingModel(_Frozen):
     batch_size: int = Field(gt=0)
 
 
+class ChatModel(_Frozen):
+    model: str
+    num_ctx: int = Field(gt=0)
+    temperature: float = Field(ge=0)
+    # gpt-oss takes an effort level ("low", "medium", "high"); other models take a bool.
+    think: bool | Literal["low", "medium", "high"] = False
+    keep_alive: str
+
+
 class ModelsConfig(_Frozen):
+    deep: ChatModel
+    small: ChatModel
     embedding: EmbeddingModel
 
 

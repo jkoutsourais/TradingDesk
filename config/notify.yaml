@@ -1,0 +1,22 @@
+# Phone pushes through ntfy (server and topic come from .env). Push text stays generic,
+# because anyone holding the topic name can read it; the link opens the full content
+# behind Cloudflare Access.
+
+base_url: https://desk.hoistlaboratory.com
+
+briefing:
+  title: Morning briefing ready
+  priority: default
+
+urgent:
+  enabled: true
+  title: Urgent alert
+  priority: high
+  # Local (ET) hours when urgent alerts may buzz the phone, every day (decided
+  # 2026-09-23). Outside them an alert is held: it stays on the dashboard and goes into
+  # the next briefing.
+  window: {start: "07:00", end: "21:00"}
+  max_per_hour: 3
+  max_per_day: 10
+  # Alerts older than this when triage confirms them are held, not pushed.
+  max_age_minutes: 30

@@ -51,6 +51,11 @@ class Settings(BaseSettings):
     # PJM Data Miner (free registration); PJM grid data is skipped until it is set.
     pjm_api_key: SecretStr | None = None
 
+    # ntfy pushes. The topic name is the only access control on hosted ntfy.sh, so it is
+    # treated as a secret.
+    ntfy_server: str = "https://ntfy.sh"
+    ntfy_topic: SecretStr | None = None
+
     @field_validator("*", mode="before")
     @classmethod
     def _blank_is_unset(cls, value: object) -> object:

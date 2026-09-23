@@ -23,8 +23,18 @@ import httpx
 from sqlalchemy import Engine, text
 
 from desk.collectors.__main__ import configure_logging
-from desk.config import TiersConfig, UniverseConfig, load_tiers, load_universe
+from desk.config import (
+    ModelsConfig,
+    TiersConfig,
+    UniverseConfig,
+    load_models,
+    load_tiers,
+    load_universe,
+)
 from desk.db import make_engine
+from desk.front_office.briefing import build_briefing, push_briefing
+from desk.front_office.notify import NotifyConfig, NtfyClient, load_notify_config
+from desk.llm.client import OllamaChat, Usage
 from desk.metrics import JobStatus, record_job_finish, record_job_start
 from desk.settings import Settings
 from desk.symbols import is_future
@@ -43,6 +53,7 @@ from desk.watch.scan import (
     load_tier_map,
     news_hits,
 )
+from desk.watch.triage import run_triage
 
 logger = logging.getLogger("desk.watch")
 
@@ -53,6 +64,10 @@ WORKER_IDLE_S = 1.0
 JOB_TIMEOUT_S = 240.0
 PLAN_DAYS_AHEAD = 8
 DAILY_CACHE_TTL_S = 3600.0
+SHIFT_TIMEOUT_S = 1800.0
+TRIAGE_SECONDS = 60
+# The pre-market shift clears the overnight triage backlog in at most this many batches.
+PRE_MARKET_TRIAGE_ROUNDS = 8
 
 
 def _slot(now: datetime, seconds: int) -> str:
@@ -185,6 +200,8 @@ class Planner:
         ):
             jobs.append(({"group": "close"}, f"scan:close:{today.isoformat()}"))
         jobs.append(({"group": "news"}, f"scan:news:{_slot(now, cadence.news_seconds)}"))
+        with engine.begin() as conn:
+            queue.enqueue(conn, "triage", {}, dedupe_key=f"triage:{_slot(now, TRIAGE_SECONDS)}")
         jobs.append(
             ({"group": "commodity"}, f"scan:commodity:{_slot(now, cadence.commodity_seconds)}")
         )
@@ -287,11 +304,32 @@ async def unload_models(base_url: str) -> list[str]:
     return [model["name"] for model in loaded]
 
 
+@dataclass
+class Deps:
+    """Everything the workers call besides the database and the scanner."""
+
+    ollama_base_url: str
+    chat: OllamaChat
+    models: ModelsConfig
+    calendar: MarketCalendar
+    tiers: TiersConfig
+    notify: NotifyConfig
+    ntfy: NtfyClient | None
+
+
+@dataclass
+class RunReport:
+    summary: str
+    usage: Usage | None = None
+    error: str | None = None  # set when the job did its work but its outcome is a failure
+
+
 class Worker:
-    def __init__(self, engine: Engine, scanner: Scanner, ollama_base_url: str) -> None:
+    def __init__(self, engine: Engine, scanner: Scanner, deps: Deps) -> None:
         self._engine = engine
         self._scanner = scanner
-        self._ollama = ollama_base_url
+        self._deps = deps
+        self._ollama = deps.ollama_base_url
 
     def _claim(self) -> queue.Job | None:
         with self._engine.begin() as conn:
@@ -301,13 +339,31 @@ class Worker:
         with self._engine.begin() as conn:
             return record_job_start(conn, job=name, desk=DESK, shift_id=job.shift_id)
 
-    def _finish(self, job: queue.Job, run_id: UUID, error: str | None) -> None:
+    def _finish(
+        self, job: queue.Job, run_id: UUID, error: str | None, usage: Usage | None = None
+    ) -> None:
+        metrics: dict[str, Any] = {}
+        if usage is not None:
+            metrics = {
+                "tokens_in": usage.tokens_in,
+                "tokens_out": usage.tokens_out,
+                "load_ms": usage.load_ms,
+                "generation_ms": usage.generation_ms,
+            }
         with self._engine.begin() as conn:
             queue.finish(conn, job, error)
             if error is None:
-                record_job_finish(conn, run_id, status=JobStatus.OK)
+                record_job_finish(conn, run_id, status=JobStatus.OK, **metrics)
             else:
-                record_job_finish(conn, run_id, status=JobStatus.FAILED, error=error)
+                record_job_finish(conn, run_id, status=JobStatus.FAILED, error=error, **metrics)
+
+    def _shift_running(self) -> bool:
+        with self._engine.connect() as conn:
+            return bool(
+                conn.execute(
+                    text("SELECT EXISTS (SELECT 1 FROM shifts WHERE status = 'running')")
+                ).scalar_one()
+            )
 
     def _set_shift(self, shift_id: UUID, status: str, note: str | None = None) -> None:
         with self._engine.begin() as conn:
@@ -321,23 +377,84 @@ class Worker:
                 {"status": status, "note": note, "id": shift_id},
             )
 
-    async def _run_shift(self, job: queue.Job) -> str:
-        assert job.shift_id is not None
-        await asyncio.to_thread(self._set_shift, job.shift_id, "running")
-        unloaded = await unload_models(self._ollama)
-        note = f"unloaded models: {', '.join(unloaded) or 'none'}; no desks run yet (Phase 2)"
-        await asyncio.to_thread(self._set_shift, job.shift_id, "ok", note)
-        return note
+    async def _triage(self) -> RunReport:
+        deps = self._deps
+        outcome = await run_triage(
+            self._engine,
+            deps.chat,
+            deps.models.small,
+            deps.tiers,
+            deps.ntfy,
+            deps.notify,
+            deps.calendar.tz,
+        )
+        summary = (
+            f"labelled {outcome.labelled} ({outcome.relevant} relevant), "
+            f"urgent pushes sent {outcome.pushed}, held {outcome.held}"
+        )
+        return RunReport(
+            summary, error=f"triage failed: {outcome.error}" if outcome.failed else None
+        )
 
-    async def _run(self, job: queue.Job) -> str:
+    async def _run_shift(self, job: queue.Job) -> RunReport:
+        assert job.shift_id is not None
+        deps = self._deps
+        kind = job.payload.get("kind")
+        await asyncio.to_thread(self._set_shift, job.shift_id, "running")
+        # The GPU cannot hold both models: every shift starts from an empty GPU.
+        unloaded = await unload_models(self._ollama)
+        notes = [f"unloaded {', '.join(unloaded) or 'nothing'}"]
+        report = RunReport("")
+        try:
+            if kind == "pre_market":
+                for _ in range(PRE_MARKET_TRIAGE_ROUNDS):
+                    triage = await self._triage()
+                    notes.append(triage.summary)
+                    if triage.error or triage.summary.startswith("labelled 0"):
+                        report.error = triage.error
+                        break
+                await deps.chat.unload(deps.models.small.model)
+            elif kind == "briefing":
+                outcome = await build_briefing(
+                    self._engine,
+                    deps.chat,
+                    deps.models.deep,
+                    deps.calendar,
+                    datetime.now(UTC),
+                    job.shift_id,
+                )
+                report.usage = outcome.result.usage if outcome.result else None
+                notes.append(f"brief {outcome.brief.id} status {outcome.brief.status.value}")
+                if deps.ntfy is not None:
+                    await push_briefing(self._engine, deps.ntfy, deps.notify, outcome.brief)
+                    notes.append("pushed")
+                else:
+                    notes.append("not pushed: NTFY_TOPIC is not set")
+                await deps.chat.unload(deps.models.deep.model)
+            else:
+                notes.append("no desks for this shift yet")
+        except Exception:
+            await asyncio.to_thread(self._set_shift, job.shift_id, "failed", "; ".join(notes))
+            raise
+        report.summary = "; ".join(notes)
+        await asyncio.to_thread(
+            self._set_shift, job.shift_id, "failed" if report.error else "ok", report.summary[:1000]
+        )
+        return report
+
+    async def _run(self, job: queue.Job) -> RunReport:
         if job.kind == "shift":
             return await self._run_shift(job)
+        if job.kind == "triage":
+            if await asyncio.to_thread(self._shift_running):
+                return RunReport("paused: a shift holds the GPU")
+            return await self._triage()
         if job.kind == "scan":
             outcome = await asyncio.to_thread(
                 self._scanner.run, job.payload, datetime.now(UTC), job.shift_id
             )
             urgent = sum(1 for t in outcome.triggers if t.urgent)
-            return (
+            return RunReport(
                 f"{outcome.hits} hits, {len(outcome.triggers)} triggers ({urgent} urgent), "
                 f"{outcome.suppressed} in cooldown, promoted {outcome.promotions or 'none'}"
             )
@@ -349,11 +466,12 @@ class Worker:
             if job is None:
                 await asyncio.sleep(WORKER_IDLE_S)
                 continue
-            name = f"{job.kind}:{job.payload.get('group') or job.payload.get('kind')}"
+            name = f"{job.kind}:{job.payload.get('group') or job.payload.get('kind') or 'run'}"
             run_id = await asyncio.to_thread(self._start, job, name)
             try:
-                async with asyncio.timeout(JOB_TIMEOUT_S):
-                    summary = await self._run(job)
+                timeout = SHIFT_TIMEOUT_S if job.kind == "shift" else JOB_TIMEOUT_S
+                async with asyncio.timeout(timeout):
+                    report = await self._run(job)
             except asyncio.CancelledError:
                 self._finish(job, run_id, "cancelled at shutdown")
                 if job.shift_id is not None and job.kind == "shift":
@@ -366,8 +484,13 @@ class Worker:
                 if job.shift_id is not None and job.kind == "shift":
                     await asyncio.to_thread(self._set_shift, job.shift_id, "failed", error)
                 continue
-            await asyncio.to_thread(self._finish, job, run_id, None)
-            logger.info("worker %d %s: %s", index, name, summary)
+            await asyncio.to_thread(self._finish, job, run_id, report.error, report.usage)
+            if report.error:
+                logger.warning(
+                    "worker %d %s failed: %s (%s)", index, name, report.error, report.summary
+                )
+            else:
+                logger.info("worker %d %s: %s", index, name, report.summary)
 
 
 async def plan_forever(engine: Engine, planner: Planner) -> None:
@@ -405,13 +528,35 @@ def close_interrupted(engine: Engine) -> None:
 async def run(engine: Engine, settings: Settings) -> None:
     calendar = MarketCalendar(load_calendar_config())
     config = load_watch_config()
+    tiers = load_tiers()
     planner = Planner(calendar, config)
-    scanner = Scanner(engine, calendar, config, load_tiers(), load_universe())
-    worker = Worker(engine, scanner, settings.ollama_base_url)
-    async with asyncio.TaskGroup() as group:
-        group.create_task(plan_forever(engine, planner), name="planner")
-        for index in range(WORKERS):
-            group.create_task(worker.run_forever(index), name=f"worker-{index}")
+    scanner = Scanner(engine, calendar, config, tiers, load_universe())
+    ntfy = (
+        NtfyClient(settings.ntfy_server, settings.ntfy_topic.get_secret_value())
+        if settings.ntfy_topic
+        else None
+    )
+    if ntfy is None:
+        logger.warning("NTFY_TOPIC is not set: briefings and urgent alerts will not be pushed")
+    deps = Deps(
+        ollama_base_url=settings.ollama_base_url,
+        chat=OllamaChat(settings.ollama_base_url),
+        models=load_models(),
+        calendar=calendar,
+        tiers=tiers,
+        notify=load_notify_config(),
+        ntfy=ntfy,
+    )
+    worker = Worker(engine, scanner, deps)
+    try:
+        async with asyncio.TaskGroup() as group:
+            group.create_task(plan_forever(engine, planner), name="planner")
+            for index in range(WORKERS):
+                group.create_task(worker.run_forever(index), name=f"worker-{index}")
+    finally:
+        await deps.chat.aclose()
+        if ntfy is not None:
+            await ntfy.aclose()
 
 
 def main() -> None:

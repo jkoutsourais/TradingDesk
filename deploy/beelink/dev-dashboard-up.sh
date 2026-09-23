@@ -1,43 +1,36 @@
 #!/usr/bin/env bash
-# Temporary remote dev dashboard (Beelink side). Removed with the Phase 9 dashboard.
+# Dashboard access on the Beelink (dev page now, Phase 9 dashboard later).
 #
 # Runs two containers with host networking, no sudo needed (docker group):
-#   desk-dev-caddy   basic-auth proxy on 127.0.0.1:8088 -> 127.0.0.1:18010, the SSH
-#                    reverse tunnel from the workstation (deploy/dev/run-dev-dashboard.ps1)
-#   desk-dev-tunnel  Cloudflare quick tunnel -> https://<random>.trycloudflare.com
+#   desk-dev-caddy  proxy on 127.0.0.1:8088 -> 127.0.0.1:18010, the SSH reverse tunnel
+#                   from the workstation (deploy/dev/run-dev-dashboard.ps1)
+#   desk-tunnel     Cloudflare named tunnel: desk.hoistlaboratory.com -> localhost:8088
 #
-# Usage: printf '%s\n%s\n' "$USER_NAME" "$PASSWORD" | ./dev-dashboard-up.sh
-# The login is read from stdin so it never appears in a process list; only its bcrypt
-# hash is written to disk.
+# Authentication is Cloudflare Access (email one-time PIN, "Jon only" policy) in front of
+# the hostname. Caddy listens on loopback only, so the tunnel is the only way in.
+#
+# Usage: printf 'TUNNEL_TOKEN=%s\n' "$TOKEN" | ./dev-dashboard-up.sh
+# The token is read from stdin and stored in a 0600 env file, never on a command line.
 set -euo pipefail
 
 DIR="$HOME/desk-dev"
 mkdir -p "$DIR"
-read -r USER_NAME
-read -r PASSWORD
+umask 077
+cat > "$DIR/tunnel.env"
 
-HASH="$(printf '%s\n' "$PASSWORD" | docker run -i --rm caddy:2 caddy hash-password)"
-cat > "$DIR/Caddyfile" <<EOF
+cat > "$DIR/Caddyfile" <<'EOF'
 :8088 {
 	bind 127.0.0.1
-	basic_auth {
-		$USER_NAME $HASH
-	}
 	redir / /dev
 	reverse_proxy 127.0.0.1:18010
 }
 EOF
-chmod 600 "$DIR/Caddyfile"
 
-docker rm -f desk-dev-caddy desk-dev-tunnel >/dev/null 2>&1 || true
+docker rm -f desk-dev-caddy desk-dev-tunnel desk-tunnel >/dev/null 2>&1 || true
 docker run -d --name desk-dev-caddy --network host --restart unless-stopped \
   -v "$DIR/Caddyfile:/etc/caddy/Caddyfile:ro" caddy:2 >/dev/null
-docker run -d --name desk-dev-tunnel --network host --restart unless-stopped \
-  cloudflare/cloudflared:latest tunnel --no-autoupdate --url http://127.0.0.1:8088 >/dev/null
+docker run -d --name desk-tunnel --network host --restart unless-stopped \
+  --env-file "$DIR/tunnel.env" cloudflare/cloudflared:latest tunnel --no-autoupdate run >/dev/null
 
-for _ in $(seq 1 30); do
-  URL="$(docker logs desk-dev-tunnel 2>&1 | grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' | tail -1 || true)"
-  [ -n "$URL" ] && break
-  sleep 2
-done
-echo "${URL:-tunnel URL not found yet; check: docker logs desk-dev-tunnel}"
+sleep 8
+docker logs desk-tunnel 2>&1 | grep -c "Registered tunnel connection" | xargs echo "tunnel connections registered:"
