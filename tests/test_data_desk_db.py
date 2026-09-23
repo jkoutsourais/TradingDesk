@@ -193,6 +193,21 @@ def test_runner_records_job_and_health(
         assert row["consecutive_failures"] == 1 and row["last_error"]
 
 
+def test_close_interrupted_runs_can_be_scoped(db_engine: Engine) -> None:
+    from desk.collectors.runner import close_interrupted_runs
+    from desk.metrics import record_job_start
+
+    mine, theirs = f"mine_{uuid4().hex[:6]}", f"theirs_{uuid4().hex[:6]}"
+    with db_engine.begin() as conn:
+        record_job_start(conn, job=mine, desk="data")
+        record_job_start(conn, job=theirs, desk="data")
+    close_interrupted_runs(db_engine, jobs={mine})
+    assert job_statuses(db_engine, mine) == ["failed"]
+    assert job_statuses(db_engine, theirs) == ["running"]
+    close_interrupted_runs(db_engine)
+    assert job_statuses(db_engine, theirs) == ["failed"]
+
+
 # --- Gap detection ------------------------------------------------------------------------
 
 NY = ZoneInfo("America/New_York")

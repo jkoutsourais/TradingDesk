@@ -1,0 +1,36 @@
+# Market sessions come from pandas_market_calendars (NYSE: holidays and half-days).
+# Release dates: weekly ones are computed below; FOMC, CPI and jobs are collected from
+# official sources by the release_calendar collector.
+
+timezone: America/New_York
+extended_hours:
+  pre_open: "04:00"
+  post_close: "20:00"
+
+weekly_releases:
+  eia_petroleum:
+    name: EIA Weekly Petroleum Status Report
+    weekday: wed
+    time: "10:30"
+    # A federal holiday earlier in the week pushes the report one trading day later.
+    holiday_shift: next_trading_day
+  eia_natural_gas:
+    name: EIA Weekly Natural Gas Storage Report
+    weekday: thu
+    time: "10:30"
+    holiday_shift: next_trading_day
+  cftc_cot:
+    name: CFTC Commitments of Traders
+    weekday: fri
+    time: "15:30"
+    # CFTC moves a holiday week's report to the following Monday.
+    holiday_shift: next_monday
+
+fred_releases:
+  # FRED release id -> event; FRED lists scheduled future dates.
+  10: {kind: cpi, name: Consumer Price Index, time: "08:30"}
+  50: {kind: jobs, name: Employment Situation, time: "08:30"}
+
+fomc:
+  url: https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm
+  statement_time: "14:00"

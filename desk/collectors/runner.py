@@ -37,6 +37,7 @@ from desk.collectors.ingest import ingest
 from desk.collectors.numeric import CftcCotCollector, EiaCollector, FredCollector
 from desk.collectors.prices import TastytradeMetrics, YahooDailyBars, yfinance_downloader
 from desk.collectors.purge import purge_raw_records
+from desk.collectors.release_calendar import ReleaseCalendar
 from desk.collectors.tastytrade_session import TastytradeConnection
 from desk.collectors.tastytrade_stream import TastytradeStream
 from desk.collectors.truth_social import TruthSocialCollector
@@ -52,6 +53,7 @@ from desk.llm.embeddings import OllamaEmbedder
 from desk.metrics import JobStatus, record_job_finish, record_job_start
 from desk.settings import REPO_ROOT, Settings
 from desk.symbols import is_future
+from desk.watch.calendar import MarketCalendar, load_calendar_config
 
 logger = logging.getLogger(__name__)
 
@@ -123,6 +125,10 @@ def build_collectors(
         return tuple(sorted({*tiers.tier_1_stocks(), *held_listed}))
 
     def stream_symbols() -> tuple[str, ...]:
+        # Tier 2 streams too (decided 2026-09-23) so its intraday scans run on live data.
+        return tuple(sorted({*tiers.tier_1_symbols(), *held(), *universe.symbols}))
+
+    def candle_symbols() -> tuple[str, ...]:
         return tuple(sorted({*tiers.tier_1_symbols(), *held()}))
 
     def daily_symbols() -> tuple[str, ...]:
@@ -151,7 +157,7 @@ def build_collectors(
         )
         shared.append(tastytrade)
         collectors += [
-            TastytradeStream(tastytrade, stream_symbols),
+            TastytradeStream(tastytrade, stream_symbols, candle_symbols),
             TastytradeMetrics(tastytrade, metrics_symbols, schedule.tz),
             TastytradePositions(tastytrade),
         ]
@@ -197,6 +203,15 @@ def build_collectors(
         collectors.append(EiaCollector(settings.eia_api_key.get_secret_value(), sources.eia))
     else:
         disabled["eia"] = "EIA_API_KEY is not set"
+
+    calendar_config = load_calendar_config()
+    collectors.append(
+        ReleaseCalendar(
+            calendar_config,
+            MarketCalendar(calendar_config),
+            settings.fred_api_key.get_secret_value() if settings.fred_api_key else None,
+        )
+    )
 
     embedder = OllamaEmbedder(settings.ollama_base_url, models.embedding)
     collectors.append(NewsEmbeddings(engine, embedder, models.embedding.batch_size))
@@ -320,16 +335,21 @@ class CollectorRunner:
                 await asyncio.sleep(LOOP_RESTART_DELAY_S)
 
 
-def close_interrupted_runs(engine: Engine) -> int:
-    """Mark data-desk runs left 'running' by a previous crash or hard stop as failed."""
+def close_interrupted_runs(engine: Engine, jobs: set[str] | None = None) -> int:
+    """Mark data-desk runs left 'running' by a previous crash or hard stop as failed.
+
+    With `jobs`, only those collectors' runs are touched, so a second process running a
+    subset never closes runs that another live process still owns.
+    """
     with engine.begin() as conn:
         closed = conn.execute(
             text(
                 "UPDATE job_runs SET status = 'failed', finished_at = now(), "
                 "error = 'interrupted: process restarted' "
-                "WHERE desk = :desk AND status = 'running'"
+                "WHERE desk = :desk AND status = 'running' "
+                "AND (CAST(:jobs AS text[]) IS NULL OR job = ANY(CAST(:jobs AS text[])))"
             ),
-            {"desk": DESK},
+            {"desk": DESK, "jobs": sorted(jobs) if jobs is not None else None},
         )
         return closed.rowcount
 

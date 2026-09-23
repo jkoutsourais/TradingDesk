@@ -185,6 +185,41 @@ def test_candle_book_releases_only_final_minutes_with_latest_values() -> None:
     assert book.drain_completed(t0 + timedelta(minutes=10)) == []
 
 
+def test_day_stats_book_merges_trade_and_summary() -> None:
+    from desk.collectors.tastytrade_stream import DayStatsBook
+
+    book = DayStatsBook()
+    at = datetime(2026, 9, 23, 14, 30, tzinfo=UTC)
+    book.update(
+        "MMM",
+        as_of=at,
+        day_open=Decimal("130.10"),
+        day_high=Decimal("131"),
+        day_low=Decimal("129.5"),
+    )
+    book.update("MMM", as_of=at, day_volume=Decimal("1200000"))
+    book.update("MMM", as_of=at, day_open=Decimal("NaN"), day_volume=Decimal("0"))
+    [stats] = book.drain()
+    assert (stats.day_open, stats.day_volume) == (Decimal("130.10"), Decimal("1200000"))
+    assert book.drain() == []
+
+
+def test_day_stats_keep_earlier_fields(db_conn: Connection) -> None:
+    from desk.collectors.base import DayStats
+
+    at = datetime(2026, 9, 23, 14, 30, tzinfo=UTC)
+    ingest(
+        db_conn, CollectResult(day_stats=[DayStats("TSTD", Decimal("50"), None, None, None, at)])
+    )
+    ingest(
+        db_conn, CollectResult(day_stats=[DayStats("TSTD", None, None, None, Decimal("900"), at)])
+    )
+    row = db_conn.execute(
+        text("SELECT day_open, day_volume FROM quotes_latest WHERE symbol = 'TSTD'")
+    ).one()
+    assert (row.day_open, row.day_volume) == (Decimal("50"), Decimal("900"))
+
+
 def test_quote_book_keeps_latest_per_symbol() -> None:
     book = QuoteBook()
     stamp = datetime(2026, 9, 23, 14, 30, tzinfo=UTC)

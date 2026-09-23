@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Desk dev status</title>
+<style>
+  :root {
+    --bg: #ffffff; --bg-subtle: #f6f8fa; --fg: #1f2328; --fg-muted: #59636e;
+    --border: #d1d9e0; --accent: #0969da; --success: #1a7f37; --danger: #d1242f;
+    --attention: #9a6700; --neutral: #818b98;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0d1117; --bg-subtle: #151b23; --fg: #f0f6fc; --fg-muted: #9198a1;
+      --border: #3d444d; --accent: #4493f8; --success: #3fb950; --danger: #f85149;
+      --attention: #d29922; --neutral: #656c76;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font: 13px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif;
+  }
+  header {
+    display: flex; flex-wrap: wrap; gap: 4px 16px; align-items: baseline;
+    padding: 12px 16px; border-bottom: 1px solid var(--border); background: var(--bg-subtle);
+  }
+  header h1 { font-size: 14px; font-weight: 600; margin: 0; }
+  header .meta { color: var(--fg-muted); }
+  main { padding: 16px; display: grid; gap: 16px; max-width: 1200px; }
+  section { border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+  section h2 {
+    font-size: 13px; font-weight: 600; margin: 0; padding: 8px 12px;
+    background: var(--bg-subtle); border-bottom: 1px solid var(--border);
+  }
+  .scroll { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { padding: 4px 12px; text-align: left; white-space: nowrap; border-top: 1px solid var(--border); }
+  tr:first-child th { border-top: 0; }
+  th { color: var(--fg-muted); font-weight: 500; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+  td.wrap { white-space: normal; min-width: 240px; color: var(--fg-muted); }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+  .ok { background: var(--success); } .failing { background: var(--danger); }
+  .stale { background: var(--attention); } .idle, .disabled { background: var(--neutral); }
+  .up { color: var(--success); } .down { color: var(--danger); }
+  .muted { color: var(--fg-muted); }
+  .empty { padding: 8px 12px; color: var(--fg-muted); }
+  .summary { display: flex; flex-wrap: wrap; gap: 16px; padding: 8px 12px; }
+  .summary div b { display: block; font-variant-numeric: tabular-nums; font-size: 16px; font-weight: 600; }
+  .account { padding: 8px 12px; border-top: 1px solid var(--border); font-weight: 600; }
+  .account:first-of-type { border-top: 0; }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+  #error { color: var(--danger); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Desk</h1>
+  <span class="meta">dev status (temporary)</span>
+  <span class="meta" id="generated"></span>
+  <span id="error"></span>
+</header>
+<main>
+  <section><h2>Triggers, last 24 hours</h2><div id="triggers" class="scroll"></div></section>
+  <section><h2>Shifts and calendar</h2><div id="shifts" class="scroll"></div></section>
+  <section><h2>Collectors</h2><div id="collectors" class="scroll"></div></section>
+  <section><h2>Data, last 24 hours</h2><div id="volumes"></div></section>
+  <section><h2>Holdings</h2><div id="holdings" class="scroll"></div></section>
+  <section><h2>Quotes</h2><div id="quotes" class="scroll"></div></section>
+  <section><h2>Failed runs, last 6 hours</h2><div id="failures" class="scroll"></div></section>
+  <section><h2>Recent commits</h2><div id="commits" class="scroll"></div></section>
+</main>
+<script>
+  const REFRESH_MS = 15000;
+  let tz = "America/New_York";
+
+  const esc = (value) => String(value ?? "").replace(/[&<>"']/g,
+    (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
+  const num = (value, digits = 2) => value === null || value === undefined ? "-" :
+    Number(value).toLocaleString("en-US", {minimumFractionDigits: digits, maximumFractionDigits: digits});
+  const count = (value) => Number(value ?? 0).toLocaleString("en-US");
+  const time = (iso) => iso ? new Date(iso).toLocaleString("en-US",
+    {timeZone: tz, month: "short", day: "numeric", hour: "2-digit", minute: "2-digit"}) : "-";
+  function age(iso) {
+    if (!iso) return "never";
+    const s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
+    if (s < 90) return `${Math.round(s)}s ago`;
+    if (s < 5400) return `${Math.round(s / 60)}m ago`;
+    if (s < 172800) return `${Math.round(s / 3600)}h ago`;
+    return `${Math.round(s / 86400)}d ago`;
+  }
+  const table = (head, rows) => rows.length
+    ? `<table><tr>${head}</tr>${rows.join("")}</table>`
+    : `<div class="empty">Nothing yet.</div>`;
+
+  function render(data) {
+    tz = data.timezone || tz;
+    document.getElementById("generated").textContent = `updated ${time(data.generated_at)} ET`;
+
+    const w = data.watch;
+    document.getElementById("triggers").innerHTML = table(
+      `<th>When</th><th class="num">Score</th><th>Tier</th><th>Rule</th><th>Trigger</th>`,
+      w.triggers.map((t) => `<tr>
+        <td>${time(t.created_at)}</td>
+        <td class="num">${t.urgent ? '<span class="dot failing"></span>' : ""}${num(t.importance)}</td>
+        <td>${t.tier === null ? "-" : esc(t.tier)}</td>
+        <td class="muted">${esc(t.rule)}</td>
+        <td class="wrap" style="color: var(--fg)">${esc(t.summary)}</td></tr>`));
+
+    const queue = w.queue_last_hour;
+    document.getElementById("shifts").innerHTML = `
+      <div class="summary">
+        <div>Jobs done (1h)<b>${count(queue.ok)}</b></div>
+        <div>Failed (1h)<b>${count(queue.failed)}</b></div>
+        <div>Queued<b>${count(queue.queued)}</b></div>
+        <div>Tier 1 promotions<b>${count(w.promotions.length)}</b><span class="muted">${esc(w.promotions.map((p) => p.symbol).join(", "))}</span></div>
+      </div>
+      ${table(`<th>Shift</th><th>Scheduled</th><th>Status</th><th>Note</th>`,
+        w.shifts.map((s) => `<tr><td>${esc(s.kind)}</td><td>${time(s.scheduled_for)}</td>
+          <td><span class="dot ${s.status === "ok" ? "ok" : s.status === "failed" ? "failing" : s.status === "skipped" ? "stale" : "idle"}"></span>${esc(s.status)}</td>
+          <td class="wrap">${esc(s.note)}</td></tr>`))}
+      ${table(`<th>Upcoming release</th><th>When</th>`,
+        w.calendar.map((e) => `<tr><td>${esc(e.name)}</td><td>${time(e.at)}</td></tr>`))}`;
+
+    document.getElementById("collectors").innerHTML = table(
+      `<th>Collector</th><th>State</th><th>Last success</th><th class="num">Fails</th>
+       <th class="num">Last run</th><th class="num">Total stored</th><th>Last error</th>`,
+      data.collectors.map((c) => `<tr>
+        <td>${esc(c.collector)}</td>
+        <td><span class="dot ${esc(c.state)}"></span>${esc(c.state)}</td>
+        <td>${c.enabled ? age(c.last_success_at) : esc(c.disabled_reason)}</td>
+        <td class="num">${count(c.consecutive_failures)}</td>
+        <td class="num">${count(c.records_added_last)}</td>
+        <td class="num">${count(c.records_added_total)}</td>
+        <td class="wrap">${c.consecutive_failures ? esc((c.last_error || "").slice(0, 160)) : ""}</td>
+      </tr>`));
+
+    const v = data.volumes;
+    document.getElementById("volumes").innerHTML = `
+      <div class="summary">
+        <div>Raw records<b>${count(v.raw_records_total)}</b></div>
+        <div>Embeddings<b>${count(v.embeddings_total)}</b></div>
+        <div>Daily bars<b>${count(v.daily_bars_total)}</b><span class="muted">${count(v.daily_bar_symbols)} symbols</span></div>
+        <div>1-min bars (24h)<b>${count(v.minute_bars_24h)}</b></div>
+        <div>Series values (24h)<b>${count(v.series_observations_24h)}</b></div>
+        <div>Grid values (24h)<b>${count(v.grid_observations_24h)}</b></div>
+      </div>
+      <div class="scroll">${table(`<th>Source</th><th class="num">New records</th>`,
+        v.raw_records_24h.map((r) => `<tr><td>${esc(r.source)}</td><td class="num">${count(r.n)}</td></tr>`))}</div>`;
+
+    document.getElementById("holdings").innerHTML = data.holdings.length ? data.holdings.map((s) => `
+      <div class="account">${esc(s.account_ref)} <span class="muted">(${esc(s.source)}, as of ${time(s.as_of)} ET)
+        net liq ${num(s.net_liquidation)} · cash ${num(s.cash)}</span></div>
+      ${table(`<th>Symbol</th><th class="num">Qty</th><th class="num">Mark</th><th class="num">Value</th>
+               <th class="num">Cost</th><th class="num">P&amp;L</th>`,
+        s.positions.map((p) => {
+          const pnl = p.market_value !== null && p.cost_basis !== null ? p.market_value - p.cost_basis : null;
+          const cls = pnl === null ? "" : pnl >= 0 ? "up" : "down";
+          return `<tr><td>${esc(p.symbol)}</td><td class="num">${num(p.quantity, 0)}</td>
+            <td class="num">${num(p.mark_price)}</td><td class="num">${num(p.market_value)}</td>
+            <td class="num">${num(p.cost_basis)}</td><td class="num ${cls}">${num(pnl)}</td></tr>`;
+        }))}`).join("") : `<div class="empty">No broker snapshots yet.</div>`;
+
+    document.getElementById("quotes").innerHTML = table(
+      `<th>Symbol</th><th class="num">Bid</th><th class="num">Ask</th><th class="num">vs prior close</th><th>Quote</th>`,
+      data.quotes.map((q) => {
+        const mid = q.bid && q.ask ? (q.bid + q.ask) / 2 : null;
+        const chg = mid && q.prev_close ? (mid / q.prev_close - 1) * 100 : null;
+        const cls = chg === null ? "" : chg >= 0 ? "up" : "down";
+        return `<tr><td>${esc(q.symbol)}</td><td class="num">${num(q.bid)}</td><td class="num">${num(q.ask)}</td>
+          <td class="num ${cls}">${chg === null ? "-" : num(chg) + "%"}</td><td class="muted">${age(q.quote_time)}</td></tr>`;
+      }));
+
+    document.getElementById("failures").innerHTML = table(
+      `<th>Job</th><th>When</th><th>Error</th>`,
+      data.failures.map((f) => `<tr><td>${esc(f.job)}</td><td>${time(f.finished_at)}</td>
+        <td class="wrap">${esc(f.error)}</td></tr>`));
+
+    document.getElementById("commits").innerHTML = table(`<th>Commit</th>`,
+      data.commits.map((line) => `<tr><td><code>${esc(line)}</code></td></tr>`));
+  }
+
+  async function refresh() {
+    try {
+      const response = await fetch("dev/status", {cache: "no-store"});
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      render(await response.json());
+      document.getElementById("error").textContent = "";
+    } catch (err) {
+      document.getElementById("error").textContent = `refresh failed: ${err.message}`;
+    }
+  }
+  refresh();
+  setInterval(refresh, REFRESH_MS);
+</script>
+</body>
+</html>

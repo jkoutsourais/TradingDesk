@@ -7,7 +7,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Protocol
+from typing import Any, Protocol
 from uuid import UUID
 
 import httpx
@@ -53,6 +53,22 @@ class QuoteSnapshot:
     bid_size: Decimal | None
     ask_size: Decimal | None
     quote_time: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class DayStats:
+    """Session statistics from DXLink Summary and Trade events for one symbol.
+
+    None means "not in this update", so a Trade (volume only) never clears the open that
+    a Summary supplied.
+    """
+
+    symbol: str
+    day_open: Decimal | None
+    day_high: Decimal | None
+    day_low: Decimal | None
+    day_volume: Decimal | None
+    as_of: datetime
 
 
 @dataclass(frozen=True, slots=True)
@@ -112,9 +128,14 @@ class CollectResult:
     observations: list[SeriesObservation] = field(default_factory=list)
     bars: list[PriceBar] = field(default_factory=list)
     quotes: list[QuoteSnapshot] = field(default_factory=list)
+    day_stats: list[DayStats] = field(default_factory=list)
     accounts: list[AccountSnapshot] = field(default_factory=list)
     embeddings: list[RecordEmbedding] = field(default_factory=list)
     grid: list[GridObservation] = field(default_factory=list)
+    # Release calendar: events plus the kinds fetched successfully this run, so upcoming
+    # events of those kinds that disappeared upstream are removed.
+    calendar_events: list[Any] = field(default_factory=list)
+    calendar_kinds: list[str] = field(default_factory=list)
     # Partial failures (e.g. one ticker of 35 returned 500). The runner stores what was
     # fetched, then marks the run failed with these messages so nothing fails silently.
     errors: list[str] = field(default_factory=list)

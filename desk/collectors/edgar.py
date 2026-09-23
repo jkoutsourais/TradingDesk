@@ -6,6 +6,7 @@ client. Filings are keyed on accession number, so the feed and the per-company p
 dedupe against each other. Only filings tied to a listed ticker are kept.
 """
 
+import logging
 import re
 import time
 import xml.etree.ElementTree as ET
@@ -18,6 +19,8 @@ import httpx
 
 from desk.artifacts.raw_record import RawRecord, content_hash
 from desk.collectors.base import CollectResult, RateLimiter, describe_http_error, make_client
+
+logger = logging.getLogger(__name__)
 
 LATEST_FEED_URL = (
     "https://www.sec.gov/cgi-bin/browse-edgar?action=getcurrent&type=&company=&dateb="
@@ -197,7 +200,9 @@ class EdgarCompanyFilings:
         for symbol in self._symbols():
             cik = cik_by_ticker.get(symbol)
             if cik is None:
-                result.errors.append(f"{symbol}: no CIK in the SEC ticker map")
+                # ETFs and funds are not in the company ticker map and have no company
+                # filings to follow; that is expected, not a failure.
+                logger.debug("%s: no CIK in the SEC ticker map, skipped", symbol)
                 continue
             try:
                 data = (await self._client.get(SUBMISSIONS_URL.format(cik=cik))).json()

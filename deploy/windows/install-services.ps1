@@ -25,10 +25,11 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-# Service name -> python module. Later phases add the scheduler and desk workers here.
+# Service name -> python module. Later phases add the desk workers here.
 $Services = [ordered]@{
     'desk-api' = 'desk.api'
     'desk-collectors' = 'desk.collectors'
+    'desk-scheduler' = 'desk.watch.scheduler'
 }
 
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
@@ -45,6 +46,24 @@ function Invoke-Nssm {
     param([Parameter(ValueFromRemainingArguments)][string[]]$Arguments)
     & $Nssm @Arguments | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "nssm $($Arguments[0..1] -join ' ') failed with exit code $LASTEXITCODE" }
+}
+
+# The account running this script (elevated, but the same user) gets start, stop, query
+# and status rights on the desk services only, so code deploys can restart them from a
+# normal shell. No other admin rights are granted.
+$ControllerSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+
+function Grant-ServiceControl {
+    param([string]$Name, [string]$Sid)
+    # RP start, WP stop, DT pause/continue, LO query status, CR user control, RC read.
+    $Ace = "(A;;RPWPDTLOCRRC;;;$Sid)"
+    $Current = (& sc.exe sdshow $Name | Where-Object { $_ -match '^D:' } | Select-Object -First 1).Trim()
+    if (-not $Current) { throw "could not read the security descriptor of $Name" }
+    if ($Current.Contains($Ace)) { return }
+    $Updated = $Current -replace '^D:', "D:$Ace"
+    & sc.exe sdset $Name $Updated | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "sc sdset $Name failed with exit code $LASTEXITCODE" }
+    Write-Host "Granted service control on $Name to the installing account"
 }
 
 foreach ($Name in $Services.Keys) {
@@ -77,6 +96,7 @@ foreach ($Name in $Services.Keys) {
     Invoke-Nssm set $Name AppRotateOnline 0
     Invoke-Nssm set $Name AppRotateBytes 10485760
     Invoke-Nssm set $Name AppEnvironmentExtra 'PYTHONUNBUFFERED=1'
+    Grant-ServiceControl -Name $Name -Sid $ControllerSid
 
     if (-not $NoStart) {
         Invoke-Nssm start $Name

@@ -71,6 +71,28 @@ def test_finnhub_company_news_uses_header_token_and_dedupes_by_story_id() -> Non
     assert len(result.errors) == 1 and result.errors[0].startswith("BAD:")
 
 
+def test_finnhub_retries_once_after_rate_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    from desk.collectors import finnhub
+
+    waits: list[float] = []
+
+    async def fake_sleep(seconds: float) -> None:
+        waits.append(seconds)
+
+    monkeypatch.setattr(finnhub.asyncio, "sleep", fake_sleep)
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        if len(calls) == 1:
+            return httpx.Response(429, headers={"x-ratelimit-reset": "0"})
+        return httpx.Response(200, json=[])
+
+    client = FinnhubClient("KEY", transport=httpx.MockTransport(handler))
+    assert run(client.get("/company-news", {"symbol": "NVDA"})) == []
+    assert len(calls) == 2 and waits == [1.0]
+
+
 def test_finnhub_earnings_hash_changes_when_actuals_arrive() -> None:
     entry = {
         "symbol": "ORCL",
@@ -299,7 +321,8 @@ def test_edgar_company_filings_within_lookback() -> None:
     assert [r.source_id for r in result.records] == ["0000320193-26-000100"]
     assert result.records[0].url is not None
     assert result.records[0].url.endswith("/320193/000032019326000100/aapl-8k.htm")
-    assert result.errors == ["ZZZZ: no CIK in the SEC ticker map"]
+    # ZZZZ (like an ETF) has no CIK: skipped, not a failed run.
+    assert result.errors == []
 
 
 def test_feed_and_submissions_share_content_hash() -> None:

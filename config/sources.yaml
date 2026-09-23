@@ -13,7 +13,8 @@ fred:
     DFF: Effective federal funds rate
 
 eia:
-  lookback_weeks: 8
+  # Five-plus years so weekly changes can be compared with the same week in prior years.
+  lookback_weeks: 320
   # EIA API v2 series IDs (weekly).
   series:
     PET.WCESTUS1.W: Crude oil stocks excluding SPR
@@ -59,7 +60,8 @@ grid:
 cftc_cot:
   # Disaggregated futures-only report (Socrata dataset 72hh-3qpy).
   dataset: 72hh-3qpy
-  lookback_weeks: 8
+  # About three years for positioning percentiles.
+  lookback_weeks: 160
   contracts:
     "088691": Gold (COMEX)
     "084691": Silver (COMEX)

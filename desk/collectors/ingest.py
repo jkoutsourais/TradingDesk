@@ -3,6 +3,7 @@ completed price bars and latest quotes. Set-based statements use unnest because
 RETURNING does not survive an executemany of text()."""
 
 from dataclasses import dataclass
+from typing import Any
 
 from sqlalchemy import Connection, text
 from sqlalchemy.exc import IntegrityError
@@ -11,6 +12,7 @@ from desk.artifacts.store import append_artifact
 from desk.collectors.base import (
     AccountSnapshot,
     CollectResult,
+    DayStats,
     GridObservation,
     PriceBar,
     QuoteSnapshot,
@@ -30,6 +32,7 @@ class IngestCounts:
     snapshots_added: int = 0
     embeddings_added: int = 0
     grid_added: int = 0
+    calendar_changed: int = 0
 
     @property
     def stored(self) -> int:
@@ -41,6 +44,7 @@ class IngestCounts:
             + self.snapshots_added
             + self.embeddings_added
             + self.grid_added
+            + self.calendar_changed
         )
 
 
@@ -114,11 +118,81 @@ def ingest(conn: Connection, result: CollectResult) -> IngestCounts:
         records_duplicate=duplicate,
         observations_added=observations_added,
         bars_added=_insert_bars(conn, result.bars),
-        quotes_updated=_upsert_quotes(conn, result.quotes),
+        quotes_updated=_upsert_quotes(conn, result.quotes)
+        + _upsert_day_stats(conn, result.day_stats),
         snapshots_added=sum(_insert_snapshot(conn, snapshot) for snapshot in result.accounts),
         embeddings_added=_insert_embeddings(conn, result.embeddings),
         grid_added=_insert_grid(conn, result.grid),
+        calendar_changed=_refresh_calendar(conn, result.calendar_events, result.calendar_kinds),
     )
+
+
+def _refresh_calendar(conn: Connection, events: list[Any], kinds: list[str]) -> int:
+    """Upsert events; drop upcoming events of the fetched kinds that no longer appear."""
+    if not kinds:
+        return 0
+    keys = [event.key for event in events]
+    changed = conn.execute(
+        text(
+            "INSERT INTO calendar_events (event_key, kind, name, at, source, updated_at) "
+            "SELECT k, kd, n, a, s, now() FROM unnest("
+            "CAST(:keys AS text[]), CAST(:kinds AS text[]), CAST(:names AS text[]), "
+            "CAST(:ats AS timestamptz[]), CAST(:sources AS text[])) AS t(k, kd, n, a, s) "
+            "ON CONFLICT (event_key) DO UPDATE SET name = EXCLUDED.name, at = EXCLUDED.at, "
+            "source = EXCLUDED.source, updated_at = now() "
+            "WHERE (calendar_events.at, calendar_events.name) IS DISTINCT FROM "
+            "(EXCLUDED.at, EXCLUDED.name) "
+            "RETURNING event_key"
+        ),
+        {
+            "keys": keys,
+            "kinds": [event.kind for event in events],
+            "names": [event.name for event in events],
+            "ats": [event.at for event in events],
+            "sources": [event.source for event in events],
+        },
+    )
+    count = len(changed.all())
+    removed = conn.execute(
+        text(
+            "DELETE FROM calendar_events WHERE kind = ANY(:kinds) AND at > now() "
+            "AND NOT (event_key = ANY(:keys))"
+        ),
+        {"kinds": kinds, "keys": keys},
+    )
+    return count + removed.rowcount
+
+
+def _upsert_day_stats(conn: Connection, stats: list[DayStats]) -> int:
+    if not stats:
+        return 0
+    updated = conn.execute(
+        text(
+            "INSERT INTO quotes_latest (symbol, source, day_open, day_high, day_low, day_volume, "
+            "day_stats_time, updated_at) "
+            "SELECT s, 'tastytrade', o, h, l, v, t, now() FROM unnest("
+            "CAST(:symbols AS text[]), CAST(:opens AS numeric[]), CAST(:highs AS numeric[]), "
+            "CAST(:lows AS numeric[]), CAST(:volumes AS numeric[]), CAST(:times AS timestamptz[])) "
+            "AS d(s, o, h, l, v, t) "
+            # Each field keeps its previous value when an update does not carry it.
+            "ON CONFLICT (symbol) DO UPDATE SET "
+            "day_open = coalesce(EXCLUDED.day_open, quotes_latest.day_open), "
+            "day_high = coalesce(EXCLUDED.day_high, quotes_latest.day_high), "
+            "day_low = coalesce(EXCLUDED.day_low, quotes_latest.day_low), "
+            "day_volume = coalesce(EXCLUDED.day_volume, quotes_latest.day_volume), "
+            "day_stats_time = EXCLUDED.day_stats_time, updated_at = now() "
+            "RETURNING symbol"
+        ),
+        {
+            "symbols": [s.symbol for s in stats],
+            "opens": [s.day_open for s in stats],
+            "highs": [s.day_high for s in stats],
+            "lows": [s.day_low for s in stats],
+            "volumes": [s.day_volume for s in stats],
+            "times": [s.as_of for s in stats],
+        },
+    )
+    return len(updated.all())
 
 
 def _insert_embeddings(conn: Connection, embeddings: list[RecordEmbedding]) -> int:

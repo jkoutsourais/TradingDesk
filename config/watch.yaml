@@ -1,0 +1,100 @@
+# Watch desk rules. Every threshold here is code-evaluated; no model is involved.
+#
+# importance = rule weight x tier weight x strength. Strength is 0.5 at a rule's threshold
+# and rises toward 1 as the hit grows: 0.5 + 0.5 * (1 - exp(-excess / scale)), where
+# excess is how far past the threshold the hit is, in the rule's own units. Rules without
+# a size (filings, keywords) use strength 0.75. A hit is urgent when
+# importance >= urgent_threshold. The threshold starts loose (decided 2026-09-23) and is
+# tightened from real hit data before Phase 3 turns on phone pushes.
+
+urgent_threshold: 0.55
+
+tier_weights: {0: 1.0, 1: 0.8, 2: 0.55, 3: 0.35}
+
+# Minutes before the same fingerprint may fire again. Price fingerprints already include
+# the trading day and direction, so most fire at most once per day per direction.
+default_cooldown_minutes: 240
+
+rules:
+  move_vs_prior_close:
+    weight: 0.9
+    # |last - prior close| in 20-day ATR units that counts as a hit, by tier.
+    atr_multiple: {0: 1.5, 1: 2.0, 2: 2.5}
+    scale: 1.5
+  gap_open:
+    weight: 0.7
+    atr_multiple: 1.0
+    scale: 1.0
+    # Only evaluated in the first minutes of the regular session.
+    window_minutes: 30
+  range_break:
+    weight: 0.7
+    lookback_days: 20
+    scale: 0.5  # ATR units beyond the prior high or low
+  volume_pace:
+    weight: 0.6
+    pace_multiple: 2.5  # today's volume vs the 20-day average, pro-rated by time of day
+    scale: 1.5
+    min_minutes: 30
+  new_52w:
+    weight: 0.6
+  iv_rank_extreme:
+    weight: 0.5
+    high: 0.9
+    low: 0.05
+  relative_strength:
+    weight: 0.4
+    lookback_days: 20
+    top_fraction: 0.03  # top and bottom 3% of the universe by 20-day return
+  cot_extreme:
+    weight: 0.6
+    percentile: 0.9  # managed-money net position vs ~3 years
+  eia_surprise:
+    weight: 0.8
+    sigma: 1.5  # weekly change vs the same week in the prior five years
+  filing:
+    weight: 0.7
+    forms: ["8-K", "SC 13D", "SC 13D/A", "10-Q", "10-K", "S-1", "424B4"]
+    form4_cluster: 3  # insider Form 4s within 5 days
+  earnings:
+    weight: 0.6
+    days_ahead: 1
+  policy_keywords:
+    weight: 0.65
+    # Group -> keywords (case-insensitive, whole words). Instruments listed are carried
+    # on the trigger so later desks know what the group touches.
+    groups:
+      tariffs: {keywords: [tariff, tariffs, duties, trade deal], instruments: [SPY, XLE, GLD]}
+      opec: {keywords: [OPEC, OPEC+, production cut, output cut], instruments: [/CL, USO, XLE]}
+      sanctions: {keywords: [sanction, sanctions, embargo], instruments: [/CL, /NG, GLD]}
+      rates: {keywords: [rate cut, rate hike, interest rates, federal funds], instruments: [SPY, GLD, /GC]}
+      metals: {keywords: [gold, silver, copper, critical minerals], instruments: [/GC, /SI, /HG, GDX]}
+      power: {keywords: [power grid, electricity, nuclear, data center, data centers], instruments: [XLU, CEG, VST]}
+      energy: {keywords: [oil, crude, LNG, natural gas, pipeline, drilling], instruments: [/CL, /NG, XLE]}
+
+schedule:
+  # Shift start times (ET) on NYSE trading days, plus the Sunday futures-open run.
+  shifts:
+    pre_market: "07:00"
+    briefing: "08:00"
+    post_market: "17:00"
+  sunday_futures: "19:00"
+  # On half-days the post-market shift moves to this long after the early close.
+  post_market_after_early_close_minutes: 60
+  # A shift found more than this late (process down at its time) is marked skipped
+  # rather than run stale.
+  shift_grace_minutes: 30
+  scans:
+    intraday_tier01_regular_seconds: 60
+    intraday_tier01_extended_seconds: 900
+    intraday_tier2_regular_seconds: 300
+    futures_overnight_seconds: 900
+    close_after_minutes: 30
+    news_seconds: 60
+    commodity_seconds: 900
+
+event_additions:
+  # A symbol outside the tiers with one of these hits joins Tier 1 for this many
+  # trading days.
+  trading_days: 5
+  rules: [filing, earnings, volume_pace, move_vs_prior_close]

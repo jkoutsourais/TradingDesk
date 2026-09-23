@@ -4,6 +4,7 @@ Ctrl+C in a terminal and NSSM's console stop both cancel the collector tasks; ea
 in-flight run is closed out in job_runs before exit.
 """
 
+import argparse
 import asyncio
 import contextlib
 import logging
@@ -26,12 +27,25 @@ def configure_logging() -> None:
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description="Run Data desk collectors")
+    parser.add_argument(
+        "--only",
+        help="comma-separated collector names; runs just these and leaves every other "
+        "collector's runs and health rows to the process that owns them",
+    )
+    args = parser.parse_args()
+    only = {name.strip() for name in args.only.split(",")} if args.only else None
+
     configure_logging()
     settings = Settings()
     schedule = load_schedule()
     engine = make_engine(settings)
     try:
-        closed = close_interrupted_runs(engine)
+        if only is not None:
+            unknown = only - set(schedule.collectors)
+            if unknown:
+                raise SystemExit(f"unknown collectors: {', '.join(sorted(unknown))}")
+        closed = close_interrupted_runs(engine, jobs=only)
         if closed:
             logger.warning("closed %d runs left open by a previous process", closed)
         built = build_collectors(
@@ -43,6 +57,9 @@ def main() -> None:
             load_universe(),
             load_models(),
         )
+        if only is not None:
+            built.collectors = [c for c in built.collectors if c.name in only]
+            built.disabled = {k: v for k, v in built.disabled.items() if k in only}
         logger.info("starting %d collectors", len(built.collectors))
         with contextlib.suppress(KeyboardInterrupt):
             asyncio.run(run_all(engine, schedule, built))

@@ -24,7 +24,6 @@ def probe(note: str, parents: tuple[ProbeArtifact, ...] = ()) -> ProbeArtifact:
         prompt_version="probe.v1",
         tokens_in=100,
         tokens_out=20,
-        shift_id=uuid4(),
     )
 
 

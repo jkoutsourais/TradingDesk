@@ -35,6 +35,8 @@ collectors:
   # Grid and embeddings (Step 1d).
   gridstatus: {interval_seconds: 900}
   news_embeddings: {interval_seconds: 60}
+  # Watch desk inputs (Phase 2).
+  release_calendar: {interval_seconds: 21600}
 
 retention:
   raw_record_days: 7

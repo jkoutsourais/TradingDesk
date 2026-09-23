@@ -13,6 +13,7 @@ from fastapi import FastAPI, HTTPException
 from sqlalchemy import Engine, text
 from sqlalchemy.exc import SQLAlchemyError
 
+from desk.api.dev import dev_router
 from desk.artifacts.store import ArtifactNotFoundError, get_artifact, get_lineage
 
 logger = logging.getLogger(__name__)
@@ -51,6 +52,7 @@ def create_app(
     ollama_transport: httpx.BaseTransport | None = None,
 ) -> FastAPI:
     app = FastAPI(title="desk", version="0.1.0")
+    app.include_router(dev_router(engine))
 
     @app.get("/health")
     def health() -> dict[str, Any]:

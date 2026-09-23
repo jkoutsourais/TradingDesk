@@ -5,7 +5,9 @@ appears in logged or stored URLs. All three collectors share one client and one 
 limiter, since the free tier's 60 calls/min is per key.
 """
 
+import asyncio
 import json
+import time
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -18,10 +20,22 @@ from desk.collectors.base import CollectResult, RateLimiter, describe_http_error
 BASE_URL = "https://finnhub.io/api/v1"
 # Stay under the documented 60/min so a clock skew never trips a 429.
 CALLS_PER_MINUTE = 55
+CALLS_PER_SECOND = 10
+MAX_RATE_LIMIT_WAIT_S = 60.0
 NEWS_LOOKBACK_DAYS = 1
 EARNINGS_LOOKBACK_DAYS = 1
 EARNINGS_LOOKAHEAD_DAYS = 14
 GENERAL_CATEGORIES = ("general", "merger")
+
+
+def _seconds_until_reset(response: httpx.Response, now: float | None = None) -> float:
+    """Wait implied by Finnhub's X-Ratelimit-Reset (epoch seconds), capped at a minute."""
+    now = time.time() if now is None else now
+    try:
+        reset = float(response.headers.get("x-ratelimit-reset", ""))
+    except ValueError:
+        return MAX_RATE_LIMIT_WAIT_S
+    return min(max(reset - now, 1.0), MAX_RATE_LIMIT_WAIT_S)
 
 
 class FinnhubClient:
@@ -30,12 +44,23 @@ class FinnhubClient:
             base_url=BASE_URL, headers={"X-Finnhub-Token": api_key}, transport=transport
         )
         self._limiter = RateLimiter(CALLS_PER_MINUTE, 60.0)
+        # Finnhub also caps bursts at 30 calls/second; a 40-symbol news pass trips it
+        # without this even though the per-minute budget is fine.
+        self._burst_limiter = RateLimiter(CALLS_PER_SECOND, 1.0)
 
     async def get(self, path: str, params: dict[str, str]) -> Any:
-        await self._limiter.acquire()
-        response = await self._http.get(path, params=params)
-        response.raise_for_status()
-        return response.json()
+        for attempt in range(2):
+            await self._limiter.acquire()
+            await self._burst_limiter.acquire()
+            response = await self._http.get(path, params=params)
+            if response.status_code == 429 and attempt == 0:
+                # The local limiter restarts empty with the process, while Finnhub still
+                # counts the previous process's calls; wait out its window once.
+                await asyncio.sleep(_seconds_until_reset(response))
+                continue
+            response.raise_for_status()
+            return response.json()
+        raise AssertionError("unreachable: the second attempt returns or raises")
 
     async def aclose(self) -> None:
         await self._http.aclose()
