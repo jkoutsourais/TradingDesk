@@ -1,0 +1,26 @@
+# Universe tiers. Tier 0 (holdings) comes from broker positions at runtime.
+# Tier 1 gets 1-minute scans and per-ticker company news; only `stocks` are polled for
+# company news, since Finnhub carries little ticker-level news for ETFs and futures.
+# Tier 2 (S&P 500) lives in universe_sp500.yaml (Step 1b).
+
+tier_1:
+  metals:
+    stocks: [NEM, AEM, WPM, FNV]
+    etfs: [GLD, SLV, GDX, GDXJ, SIL]
+    futures: [/GC, /SI, /HG]
+  levered_metals:
+    # 2x/3x daily-reset funds: holding-period warnings apply (risk desk).
+    etfs: [NUGT, JNUG, AGQ, UGL]
+  energy:
+    stocks: [XOM, CVX, COP, OXY, EQT]
+    etfs: [USO, UNG, XLE, XOP, OIH]
+    futures: [/CL, /NG]
+  power_grid:
+    stocks: [VST, CEG, NRG, TLN, GEV, ETN, PWR, VRT, NEE]
+    etfs: [XLU]
+  megacap_tech:
+    stocks: [NVDA, MSFT, GOOGL, AMZN, META, AAPL, AVGO, TSLA, ORCL, AMD]
+
+tier_3_macro:
+  # Context only, never traded. FRED series are listed in sources.yaml.
+  symbols: [DX-Y.NYB, ^VIX, ^TNX]

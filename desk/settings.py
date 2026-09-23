@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from pydantic import SecretStr
+from pydantic import SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import URL
 
@@ -28,6 +28,34 @@ class Settings(BaseSettings):
 
     api_host: str = "127.0.0.1"
     api_port: int = 8000
+
+    # tastytrade OAuth: client secret of the personal OAuth application and a refresh
+    # token from a personal grant. Optional so services that do not touch tastytrade start
+    # without them.
+    tastytrade_client_secret: SecretStr | None = None
+    tastytrade_refresh_token: SecretStr | None = None
+
+    # Data desk sources. A collector whose key is missing is registered as disabled
+    # (visible on the dashboard) instead of failing every run.
+    finnhub_api_key: SecretStr | None = None
+    fred_api_key: SecretStr | None = None
+    eia_api_key: SecretStr | None = None
+    # SEC fair-access policy: "<name> <contact email>". Stays in .env, never committed.
+    sec_user_agent: str | None = None
+
+    # IBKR Flex Web Service (read-only statements); the query ID is the number shown
+    # beside the saved Activity Flex Query in Client Portal.
+    flex_query_api_token: SecretStr | None = None
+    flex_query_id: str | None = None
+
+    # PJM Data Miner (free registration); PJM grid data is skipped until it is set.
+    pjm_api_key: SecretStr | None = None
+
+    @field_validator("*", mode="before")
+    @classmethod
+    def _blank_is_unset(cls, value: object) -> object:
+        # `KEY=` lines in .env mean "not configured yet", not "configured as empty".
+        return None if isinstance(value, str) and not value.strip() else value
 
     def database_url(self, database: str | None = None) -> URL:
         """SQLAlchemy URL for the psycopg 3 driver; `database` overrides the configured name."""

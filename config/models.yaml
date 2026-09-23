@@ -1,0 +1,14 @@
+# Model names live here, never in code. The deep and small roles are added with the
+# phases that first use them (Phase 3 briefing, Phase 2 triage).
+
+embedding:
+  model: nomic-embed-text
+  # Must match the vector column width in migration 0005; the embedder checks every reply.
+  dimensions: 768
+  # nomic-embed-text is trained with task prefixes on each input.
+  document_prefix: "search_document: "
+  query_prefix: "search_query: "
+  # CPU only, so embeddings never compete with the deep model for the 16 GB GPU.
+  cpu_only: true
+  keep_alive: 10m
+  batch_size: 64

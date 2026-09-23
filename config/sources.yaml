@@ -1,0 +1,78 @@
+# Series and contracts pulled by the numeric collectors.
+
+fred:
+  lookback_days: 30
+  series:
+    DGS2: 2-year Treasury yield
+    DGS10: 10-year Treasury yield
+    DFII10: 10-year TIPS real yield
+    T10YIE: 10-year breakeven inflation
+    T10Y2Y: 10y minus 2y curve
+    DTWEXBGS: Broad trade-weighted dollar index
+    VIXCLS: VIX close
+    DFF: Effective federal funds rate
+
+eia:
+  lookback_weeks: 8
+  # EIA API v2 series IDs (weekly).
+  series:
+    PET.WCESTUS1.W: Crude oil stocks excluding SPR
+    PET.WGTSTUS1.W: Total motor gasoline stocks
+    PET.WDISTUS1.W: Distillate fuel oil stocks
+    PET.W_EPC0_SAX_YCUOK_MBBL.W: Cushing crude oil stocks
+    PET.WCRFPUS2.W: Crude oil field production
+    PET.WPULEUS3.W: Refinery utilization
+    NG.NW2_EPG0_SWO_R48_BCF.W: Natural gas working storage, Lower 48
+
+grid:
+  # Intervals are stored once they ended at least this long ago, so values are final.
+  settle_minutes: 15
+  isos:
+    ercot:
+      load: true
+      fuel_mix: true
+      prices:
+        method: get_spp
+        market: REAL_TIME_15_MIN
+        location_type: Trading Hub
+        locations: [HB_NORTH, HB_HOUSTON, HB_WEST, HB_SOUTH, HB_HUBAVG]
+    miso:
+      load: true
+      fuel_mix: true
+      prices:
+        method: get_lmp
+        market: REAL_TIME_5_MIN
+        locations: [ILLINOIS.HUB, INDIANA.HUB, MICHIGAN.HUB, MINN.HUB, ARKANSAS.HUB, LOUISIANA.HUB, TEXAS.HUB]
+    caiso:
+      load: true
+      fuel_mix: true
+    pjm:
+      # Enabled only when PJM_API_KEY is set (free PJM Data Miner registration).
+      requires_key: true
+      load: true
+      fuel_mix: true
+      prices:
+        method: get_lmp
+        market: REAL_TIME_5_MIN
+        locations: [WESTERN HUB, AEP-DAYTON HUB, DOMINION HUB, EASTERN HUB]
+
+cftc_cot:
+  # Disaggregated futures-only report (Socrata dataset 72hh-3qpy).
+  dataset: 72hh-3qpy
+  lookback_weeks: 8
+  contracts:
+    "088691": Gold (COMEX)
+    "084691": Silver (COMEX)
+    "085692": Copper (COMEX)
+    "067651": WTI crude (NYMEX)
+    "023651": Natural gas, Henry Hub (NYMEX)
+  fields:
+    - open_interest_all
+    - prod_merc_positions_long
+    - prod_merc_positions_short
+    - swap_positions_long_all
+    - swap__positions_short_all
+    - m_money_positions_long_all
+    - m_money_positions_short_all
+    - other_rept_positions_long
+    - other_rept_positions_short

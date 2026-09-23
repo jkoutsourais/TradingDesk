@@ -1,0 +1,43 @@
+# Collector cadence. Times are America/New_York; storage is UTC.
+# A collector without a window runs around the clock. Windows skip weekends only until
+# the Phase 2 market calendar adds holidays and half-days.
+
+timezone: America/New_York
+
+collectors:
+  finnhub_company_news: {interval_seconds: 120}
+  finnhub_general_news: {interval_seconds: 120}
+  finnhub_earnings_calendar: {interval_seconds: 3600}
+  edgar_latest_filings:
+    interval_seconds: 90
+    window: {days: [mon, tue, wed, thu, fri], start: "06:00", end: "20:00"}
+  edgar_company_filings: {interval_seconds: 3600}
+  federal_register_public_inspection: {interval_seconds: 120}
+  federal_register_documents: {interval_seconds: 600}
+  fed_speeches: {interval_seconds: 120}
+  fed_press_releases: {interval_seconds: 120}
+  truth_social: {interval_seconds: 120}
+  fred: {interval_seconds: 3600}
+  eia: {interval_seconds: 3600}
+  cftc_cot: {interval_seconds: 3600}
+  raw_record_purge: {interval_seconds: 3600}
+  # Prices (Step 1b). Daily bars store only completed days, so hourly runs are cheap
+  # no-ops until a new day closes.
+  yahoo_daily_bars: {interval_seconds: 3600}
+  tastytrade_stream: {interval_seconds: 60}
+  tastytrade_metrics:
+    interval_seconds: 3600
+    window: {days: [mon, tue, wed, thu, fri], start: "16:30", end: "19:30"}
+  # Brokers (Step 1c). Flex statements cover the last completed business day, so an
+  # hourly request only stores something new once per day.
+  ibkr_flex: {interval_seconds: 3600}
+  tastytrade_positions: {interval_seconds: 900}
+  # Grid and embeddings (Step 1d).
+  gridstatus: {interval_seconds: 900}
+  news_embeddings: {interval_seconds: 60}
+
+retention:
+  raw_record_days: 7
+
+# A run slower than this is cancelled and recorded as failed.
+run_timeout_seconds: 300
