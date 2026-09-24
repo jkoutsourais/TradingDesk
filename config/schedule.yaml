@@ -12,6 +12,8 @@ collectors:
     interval_seconds: 90
     window: {days: [mon, tue, wed, thu, fri], start: "06:00", end: "20:00"}
   edgar_company_filings: {interval_seconds: 3600}
+  # 8-K text for held and tier 1 names, read by the research desk (Phase 4).
+  edgar_filing_text: {interval_seconds: 900}
   federal_register_public_inspection: {interval_seconds: 120}
   federal_register_documents: {interval_seconds: 600}
   fed_speeches: {interval_seconds: 120}

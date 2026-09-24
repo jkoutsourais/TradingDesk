@@ -50,6 +50,9 @@ FRED_SERIES = (
 )
 MAX_TRIGGERS = 12
 MAX_NEWS = 10
+# Verified research claims per holding, and in total, offered to the briefing.
+MAX_CLAIMS_PER_HOLDING = 3
+MAX_CLAIMS = 20
 QUOTE_FRESH = timedelta(minutes=30)
 
 
@@ -107,17 +110,20 @@ class BriefingInputs:
     holdings_order: list[str] = field(default_factory=list)
     trigger_ids: list[UUID] = field(default_factory=list)
     news_ids: list[UUID] = field(default_factory=list)
+    verified_claim_ids: list[UUID] = field(default_factory=list)
     calendar_ids: list[str] = field(default_factory=list)
 
 
 def _last_and_prior_close(conn: Connection, symbol: str, before: datetime) -> list[Any]:
-    return conn.execute(
-        text(
-            "SELECT ts, close FROM price_bars WHERE source = 'yahoo' AND interval = '1d' "
-            "AND symbol = :s AND ts < :before ORDER BY ts DESC LIMIT 2"
-        ),
-        {"s": symbol, "before": before},
-    ).all()
+    return list(
+        conn.execute(
+            text(
+                "SELECT ts, close FROM price_bars WHERE source = 'yahoo' AND interval = '1d' "
+                "AND symbol = :s AND ts < :before ORDER BY ts DESC LIMIT 2"
+            ),
+            {"s": symbol, "before": before},
+        ).all()
+    )
 
 
 def _live_price(conn: Connection, symbol: str, now: datetime) -> tuple[Decimal, str] | None:
@@ -303,6 +309,8 @@ def gather(
             )
         )
 
+    _claim_facts(conn, inputs, covers_from)
+
     events = conn.execute(
         text(
             "SELECT event_key, name, at FROM calendar_events WHERE at >= :start AND at < :end "
@@ -324,6 +332,51 @@ def gather(
             )
         )
     return inputs
+
+
+def _claim_facts(conn: Connection, inputs: BriefingInputs, covers_from: datetime) -> None:
+    """Fact-checked research claims on holdings, strongest support first.
+
+    A corrected claim carries the recomputed move next to the stated one, so the rendered
+    text never repeats a wrong number on its own.
+    """
+    if not inputs.holdings_order:
+        return
+    rows = conn.execute(
+        text(
+            "SELECT v.id, c.payload->>'subject' AS subject, "
+            "c.payload->>'statement' AS statement, v.payload->>'verdict' AS verdict, "
+            "v.payload->'recomputed' AS recomputed, "
+            "row_number() OVER (PARTITION BY c.payload->>'subject' "
+            "  ORDER BY (v.payload->>'entailment')::float DESC NULLS LAST, v.created_at DESC) "
+            "  AS rank "
+            "FROM artifacts v JOIN artifacts c ON c.id = (v.payload->>'claim_id')::uuid "
+            "WHERE v.kind = 'verified_claim' AND v.status = 'ok' "
+            "AND v.payload->>'verdict' IN ('verified', 'corrected') "
+            "AND v.created_at >= :since AND c.payload->>'subject' = ANY(:symbols)"
+        ),
+        {"since": covers_from, "symbols": inputs.holdings_order},
+    ).all()
+    chosen = sorted(
+        (row for row in rows if row.rank <= MAX_CLAIMS_PER_HOLDING),
+        key=lambda row: (inputs.holdings_order.index(row.subject), row.rank),
+    )[:MAX_CLAIMS]
+    for index, row in enumerate(chosen, start=1):
+        display = row.statement
+        if row.verdict == "corrected":
+            moves = ", ".join(f"{r['stated']} was {r['value']}%" for r in row.recomputed)
+            display = f"{display} [recomputed from stored closes: {moves}]"
+        inputs.verified_claim_ids.append(row.id)
+        inputs.facts.append(
+            Fact(
+                f"claim_{index}",
+                display,
+                "",
+                display,
+                f"fact-checked research on {row.subject}",
+                f"verified_claim:{row.id}",
+            )
+        )
 
 
 # --- Build --------------------------------------------------------------------------------
@@ -403,7 +456,7 @@ async def build_briefing(
         produced_by="front_office.briefing",
         runtime_ms=0,
         shift_id=shift_id,
-        parents=(*inputs.trigger_ids, *inputs.news_ids),
+        parents=(*inputs.trigger_ids, *inputs.news_ids, *inputs.verified_claim_ids),
         purpose="morning_brief",
         facts=tuple(
             SnapshotFact(

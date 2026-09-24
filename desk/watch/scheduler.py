@@ -6,8 +6,10 @@ One process, two parts:
            on the market calendar
   workers  claim jobs from the Postgres queue, run them, and record each run in job_runs
 
-A shift in Phase 2 unloads any Ollama models (the GPU rule) and completes; the desks it
-will run arrive in later phases.
+Every shift starts by unloading all Ollama models (the GPU rule), then runs its desks:
+  pre_market   triage rounds on the small model
+  briefing     morning brief on the deep model, pushed through ntfy
+  post_market  research on the deep model, then fact-check on the small model
 """
 
 import asyncio
@@ -32,9 +34,12 @@ from desk.config import (
     load_universe,
 )
 from desk.db import make_engine
+from desk.desks.factcheck import run_factcheck
+from desk.desks.research import run_research
 from desk.front_office.briefing import build_briefing, push_briefing
 from desk.front_office.notify import NotifyConfig, NtfyClient, load_notify_config
 from desk.llm.client import OllamaChat, Usage
+from desk.llm.embeddings import OllamaEmbedder
 from desk.metrics import JobStatus, record_job_finish, record_job_start
 from desk.settings import Settings
 from desk.symbols import is_future
@@ -310,6 +315,7 @@ class Deps:
 
     ollama_base_url: str
     chat: OllamaChat
+    embedder: OllamaEmbedder
     models: ModelsConfig
     calendar: MarketCalendar
     tiers: TiersConfig
@@ -431,6 +437,8 @@ class Worker:
                 else:
                     notes.append("not pushed: NTFY_TOPIC is not set")
                 await deps.chat.unload(deps.models.deep.model)
+            elif kind == "post_market":
+                notes += await self._research_and_factcheck(job.shift_id, report)
             else:
                 notes.append("no desks for this shift yet")
         except Exception:
@@ -441,6 +449,39 @@ class Worker:
             self._set_shift, job.shift_id, "failed" if report.error else "ok", report.summary[:1000]
         )
         return report
+
+    async def _research_and_factcheck(self, shift_id: UUID, report: RunReport) -> list[str]:
+        deps = self._deps
+        research = await run_research(
+            self._engine,
+            deps.chat,
+            deps.models.deep,
+            deps.embedder,
+            deps.models.embedding,
+            deps.tiers,
+            datetime.now(UTC),
+            shift_id,
+        )
+        await deps.chat.unload(deps.models.deep.model)
+        notes = [
+            f"research: {len(research.dossiers)} dossiers, {research.claims} claims, "
+            f"{len(research.failed)} failed"
+        ]
+        notes += research.failed[:5]
+        check = await run_factcheck(
+            self._engine, deps.chat, deps.models.small, deps.calendar.tz, shift_id
+        )
+        await deps.chat.unload(deps.models.small.model)
+        notes.append(
+            f"fact-check: {check.verified} verified, {check.corrected} corrected, "
+            f"{check.rejected} rejected, {check.failed} failed"
+        )
+        report.usage = check.usage
+        if check.error:
+            report.error = check.error
+        elif research.failed and not research.dossiers:
+            report.error = "research produced no dossiers"
+        return notes
 
     async def _run(self, job: queue.Job) -> RunReport:
         if job.kind == "shift":
@@ -529,6 +570,7 @@ async def run(engine: Engine, settings: Settings) -> None:
     calendar = MarketCalendar(load_calendar_config())
     config = load_watch_config()
     tiers = load_tiers()
+    models = load_models()
     planner = Planner(calendar, config)
     scanner = Scanner(engine, calendar, config, tiers, load_universe())
     ntfy = (
@@ -541,7 +583,8 @@ async def run(engine: Engine, settings: Settings) -> None:
     deps = Deps(
         ollama_base_url=settings.ollama_base_url,
         chat=OllamaChat(settings.ollama_base_url),
-        models=load_models(),
+        embedder=OllamaEmbedder(settings.ollama_base_url, models.embedding),
+        models=models,
         calendar=calendar,
         tiers=tiers,
         notify=load_notify_config(),
@@ -555,6 +598,7 @@ async def run(engine: Engine, settings: Settings) -> None:
                 group.create_task(worker.run_forever(index), name=f"worker-{index}")
     finally:
         await deps.chat.aclose()
+        await deps.embedder.aclose()
         if ntfy is not None:
             await ntfy.aclose()
 

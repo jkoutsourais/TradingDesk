@@ -22,6 +22,7 @@ EMBEDDED_SOURCES = (
     "fed.press",
     "federal_register.document",
     "federal_register.public_inspection",
+    "edgar.filing_text",
 )
 MAX_RECORDS_PER_RUN = 512
 MAX_TEXT_CHARS = 4000
@@ -41,6 +42,8 @@ def record_text(source: str, body: dict[str, Any], url: str | None) -> str:
         parts = [body.get("title"), *(body.get("subjects") or [])]
     elif source == "federal_register.document":
         parts = [body.get("type"), body.get("title"), body.get("abstract")]
+    elif source == "edgar.filing_text":
+        parts = [body.get("text")]
     else:
         parts = []
     joined = " \n".join(str(part) for part in parts if part)

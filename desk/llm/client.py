@@ -52,6 +52,12 @@ class StructuredResult[T: BaseModel]:
         return self.value is not None
 
 
+def request_failure(exc: httpx.HTTPError) -> str:
+    """A readable reason for a failed request; httpx timeouts often carry an empty message."""
+    detail = str(exc).strip()
+    return f"model request failed: {type(exc).__name__}" + (f" ({detail})" if detail else "")
+
+
 class OllamaChat:
     def __init__(self, base_url: str, transport: httpx.AsyncBaseTransport | None = None) -> None:
         self._http = httpx.AsyncClient(

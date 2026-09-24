@@ -25,6 +25,7 @@ from desk.collectors.federal_register import (
     FederalRegisterDocuments,
     FederalRegisterPublicInspection,
 )
+from desk.collectors.filing_text import FilingText
 from desk.collectors.finnhub import (
     FinnhubClient,
     FinnhubCompanyNews,
@@ -189,9 +190,13 @@ def build_collectors(
 
     if settings.sec_user_agent:
         edgar = EdgarClient(settings.sec_user_agent)
-        collectors += [EdgarLatestFilings(edgar), EdgarCompanyFilings(edgar, news_symbols)]
+        collectors += [
+            EdgarLatestFilings(edgar),
+            EdgarCompanyFilings(edgar, news_symbols),
+            FilingText(engine, edgar, news_symbols),
+        ]
     else:
-        for name in ("edgar_latest_filings", "edgar_company_filings"):
+        for name in ("edgar_latest_filings", "edgar_company_filings", "edgar_filing_text"):
             disabled[name] = "SEC_USER_AGENT is not set"
 
     if settings.fred_api_key:

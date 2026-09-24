@@ -13,6 +13,8 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import Engine, text
 
 from desk.artifacts.brief import Brief, FactSnapshot, TriageLabel
+from desk.artifacts.raw_record import RawRecord
+from desk.artifacts.research import Claim, Dossier, VerifiedClaim
 from desk.artifacts.store import ArtifactNotFoundError, get_artifact
 from desk.artifacts.trigger import Trigger
 from desk.config import load_schedule
@@ -188,5 +190,80 @@ def pages_router(engine: Engine) -> APIRouter:
             )
         body.append("</main>")
         return _page(trigger.summary, "".join(body))
+
+    @router.get("/dossiers/{dossier_id}", response_class=HTMLResponse)
+    def dossier_page(dossier_id: UUID) -> str:
+        dossier = load(dossier_id)
+        if not isinstance(dossier, Dossier):
+            raise HTTPException(status_code=404, detail="not a dossier")
+        with engine.connect() as conn:
+            verdict_ids = {
+                claim_id: verdict_id
+                for claim_id, verdict_id in conn.execute(
+                    text(
+                        "SELECT DISTINCT ON (payload->>'claim_id') payload->>'claim_id', id "
+                        "FROM artifacts WHERE kind = 'verified_claim' AND status = 'ok' "
+                        "AND payload->>'claim_id' = ANY(:ids) "
+                        "ORDER BY payload->>'claim_id', created_at DESC"
+                    ),
+                    {"ids": [str(c) for c in dossier.claim_ids]},
+                )
+            }
+        when = dossier.created_at.astimezone(tz)
+        kind = "Holding" if dossier.subject_kind == "holding" else "Play"
+        body = [
+            _header(f"{dossier.subject} research", f"{when:%a %b} {when.day}, {when:%H:%M} ET"),
+            "<main>",
+        ]
+        if dossier.status.value == "failed":
+            body.append(f'<div class="banner">Research failed: {_esc(dossier.error)}</div>')
+        score = "" if dossier.selection_score is None else f", score {dossier.selection_score:.2f}"
+        body.append(f'<p class="muted">{kind}{score}. Claims marked [cN] are listed below.</p>')
+        for section in dossier.sections:
+            body.append(
+                f"<section><h2>{_esc(section.title)}</h2><ul><li>{_esc(section.text)}</li></ul>"
+                "</section>"
+            )
+        rows = []
+        for index, claim_id in enumerate(dossier.claim_ids, start=1):
+            claim = load(claim_id)
+            assert isinstance(claim, Claim)
+            source = load(claim.source_record_id)
+            verdict_id = verdict_ids.get(str(claim_id))
+            verified = load(verdict_id) if verdict_id else None
+            if isinstance(verified, VerifiedClaim):
+                support = "-" if verified.entailment is None else f"{verified.entailment:.1f}"
+                recomputed = "; ".join(
+                    f"{r.stated} recomputed {r.value}{r.unit}" for r in verified.recomputed
+                )
+                check = (
+                    f'<span class="pill">{_esc(verified.verdict)}</span> '
+                    f'<span class="num">{support}</span> {_esc(recomputed)}'
+                    f'<div class="muted">{_esc(verified.reason)}</div>'
+                )
+            else:
+                check = '<span class="muted">pending</span>'
+            link = (
+                f'<a href="{_esc(source.url)}">{_esc(source.source)}</a>'
+                if isinstance(source, RawRecord) and source.url
+                else _esc(getattr(source, "source", "source"))
+            )
+            rows.append(
+                f'<tr><td>c{index}</td><td class="wrap">{_esc(claim.statement)}'
+                f'<div class="muted">&ldquo;{_esc(claim.quoted_span)}&rdquo; ({link})</div></td>'
+                f'<td class="wrap">{check}</td></tr>'
+            )
+        if rows:
+            body.append(
+                '<section><h2>Claims</h2><div class="scroll"><table><tr><th>Ref</th>'
+                "<th>Claim and quote</th><th>Fact-check</th></tr>"
+                + "".join(rows)
+                + "</table></div></section>"
+            )
+        body.append(
+            f'<p class="muted">Model {_esc(dossier.model)}, prompt '
+            f"{_esc(dossier.prompt_version)}.</p></main>"
+        )
+        return _page(f"{dossier.subject} research", "".join(body))
 
     return router

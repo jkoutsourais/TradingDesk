@@ -1,5 +1,6 @@
 import asyncio
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -9,7 +10,7 @@ from pydantic import BaseModel
 
 from desk.config import load_models
 from desk.llm.client import OllamaChat
-from desk.llm.prompts import Prompt, load_prompt
+from desk.llm.prompts import PROMPTS_DIR, Prompt, load_prompt
 
 MODELS = load_models()
 PROMPT = Prompt(version="test.v1", system="You are a test.", user="Say hi.")
@@ -94,3 +95,12 @@ def test_load_prompt_keeps_fact_braces(tmp_path: Path) -> None:
     assert prompt.version == "demo.v3"
     assert "{AEP.change_pct}" in prompt.system
     assert prompt.user == "Facts:\n{AEP.change_pct} = -1.2%"
+
+
+def test_every_shipped_prompt_loads() -> None:
+    placeholder = re.compile(r"\$\{(\w+)\}")
+    for path in sorted(PROMPTS_DIR.glob("*.md")):
+        names = set(placeholder.findall(path.read_text(encoding="utf-8")))
+        prompt = load_prompt(path.stem, dict.fromkeys(names, "x"))
+        assert prompt.version.startswith(f"{path.stem}.v")
+        assert "$" + "{" not in prompt.system + prompt.user

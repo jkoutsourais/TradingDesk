@@ -26,11 +26,19 @@ class OllamaEmbedder:
         return self._config.model
 
     async def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        return await self._embed([self._config.document_prefix + text for text in texts])
+
+    async def embed_query(self, query: str) -> list[float]:
+        """A search query; nomic-embed-text is trained with a separate query prefix."""
+        return (await self._embed([self._config.query_prefix + query]))[0]
+
+    async def _embed(self, inputs: list[str]) -> list[list[float]]:
+        texts = inputs
         if not texts:
             return []
         body: dict[str, object] = {
             "model": self._config.model,
-            "input": [self._config.document_prefix + text for text in texts],
+            "input": inputs,
             "keep_alive": self._config.keep_alive,
         }
         if self._config.cpu_only:
