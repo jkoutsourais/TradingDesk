@@ -23,7 +23,7 @@ from desk.artifacts.research import Claim, ClaimNumber, Dossier, DossierSection
 from desk.artifacts.store import append_artifact
 from desk.collectors.embeddings import record_text
 from desk.collectors.holdings import held_symbols
-from desk.config import ChatModel, EmbeddingModel, TiersConfig
+from desk.config import ChatModel, EmbeddingModel
 from desk.desks.factcheck import number_in_quote, quote_in_source
 from desk.llm.client import OllamaChat, StructuredResult, Usage, request_failure
 from desk.llm.embeddings import OllamaEmbedder
@@ -31,16 +31,12 @@ from desk.llm.prompts import load_prompt
 
 logger = logging.getLogger(__name__)
 
-TOP_PLAYS = 3
 TRIGGER_WINDOW = timedelta(hours=24)
 SOURCE_WINDOW = timedelta(days=3)
 MAX_SOURCES = 12
 MAX_SOURCE_CHARS = 1500
 MAX_FILING_CHARS = 6000
 SIMILAR_SOURCES = 5
-NEWS_BONUS_PER_ITEM = 0.05
-NEWS_BONUS_CAP = 0.2
-TIER_FACTOR = {1: 1.0, 2: 0.8}
 DIGITS = re.compile(r"\d+(?:[.,]\d+)*")
 CLAIM_REF = re.compile(r"\[c(\d+)\]")
 
@@ -54,6 +50,9 @@ class Subject:
     kind: Literal["holding", "play"]
     score: float | None = None
     reasons: tuple[str, ...] = ()
+    # Artifacts that put the subject on the list (lane candidates, a thesis), kept as
+    # dossier parents for lineage.
+    origins: tuple[UUID, ...] = ()
 
 
 def combine_importance(values: list[float]) -> float:
@@ -64,49 +63,8 @@ def combine_importance(values: list[float]) -> float:
     return 1.0 - remaining
 
 
-def play_score(importances: list[float], relevant_news: int, tier: int | None) -> float:
-    base = combine_importance(importances)
-    bonus = min(relevant_news * NEWS_BONUS_PER_ITEM, NEWS_BONUS_CAP)
-    return round((base + bonus) * TIER_FACTOR.get(tier or 2, 0.8), 4)
-
-
-def select_subjects(conn: Connection, tiers: TiersConfig, now: datetime) -> list[Subject]:
-    held = list(held_symbols(conn))
-    subjects = [Subject(symbol, "holding") for symbol in held]
-    tier1 = set(tiers.tier_1_symbols())
-    triggers = conn.execute(
-        text(
-            "SELECT payload->>'instrument' AS symbol, (payload->>'importance')::float AS imp, "
-            "payload->>'summary' AS summary FROM artifacts WHERE kind = 'trigger' "
-            "AND created_at >= :since AND payload->>'instrument' NOT LIKE 'policy:%'"
-        ),
-        {"since": now - TRIGGER_WINDOW},
-    ).all()
-    news: dict[str, int] = {
-        row[0]: row[1]
-        for row in conn.execute(
-            text(
-                "SELECT ticker, count(*) FROM ("
-                "  SELECT jsonb_array_elements_text(r.payload->'tickers') AS ticker "
-                "  FROM artifacts l JOIN artifacts r ON r.id = (l.payload->>'subject_id')::uuid "
-                "  WHERE l.kind = 'triage_label' AND l.payload->>'label' = 'relevant' "
-                "  AND r.kind = 'raw_record' AND r.created_at >= :since) t GROUP BY ticker"
-            ),
-            {"since": now - TRIGGER_WINDOW},
-        )
-    }
-    by_symbol: dict[str, list[Any]] = {}
-    for row in triggers:
-        if row.symbol not in held:
-            by_symbol.setdefault(row.symbol, []).append(row)
-    ranked = []
-    for symbol, rows in by_symbol.items():
-        tier = 1 if symbol in tier1 else 2
-        score = play_score([r.imp for r in rows], int(news.get(symbol, 0)), tier)
-        top = sorted(rows, key=lambda r: r.imp, reverse=True)[:3]
-        ranked.append(Subject(symbol, "play", score, tuple(r.summary for r in top)))
-    ranked.sort(key=lambda s: s.score or 0.0, reverse=True)
-    return subjects + ranked[:TOP_PLAYS]
+def holding_subjects(conn: Connection) -> list[Subject]:
+    return [Subject(symbol, "holding") for symbol in held_symbols(conn)]
 
 
 # --- Sources -------------------------------------------------------------------------------
@@ -354,7 +312,7 @@ async def research_subject(
         produced_by="research",
         runtime_ms=int((datetime.now(UTC) - started).total_seconds() * 1000),
         shift_id=shift_id,
-        parents=tuple(c.id for c in claims),
+        parents=(*(c.id for c in claims), *subject.origins),
         model=model.model,
         prompt_version=prompt.version,
         tokens_in=result.usage.tokens_in,
@@ -378,12 +336,10 @@ async def run_research(
     model: ChatModel,
     embedder: OllamaEmbedder | None,
     embed_config: EmbeddingModel,
-    tiers: TiersConfig,
+    subjects: list[Subject],
     now: datetime,
     shift_id: UUID | None = None,
 ) -> ResearchOutcome:
-    with engine.connect() as conn:
-        subjects = select_subjects(conn, tiers, now)
     outcome = ResearchOutcome()
     for subject in subjects:
         dossier, claims, usage, error = await research_subject(

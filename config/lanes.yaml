@@ -1,0 +1,87 @@
+# Idea lanes (Phase 5). Every lane turns watch triggers and code screens into candidates
+# with a code-computed score; the idea desk keeps the best few for research and theses.
+#
+# Candidate score = lane weight x combined importance of its triggers (1 - prod(1 - v)),
+# plus a bonus for verified claims on the instrument, capped at 1.
+# Screen scores use the watch desk's strength curve: 0.5 at the threshold, rising toward
+# 1 as the move grows past it (scale in the screen's own units).
+
+trigger_window_hours: 24
+claim_window_days: 3
+claim_bonus_per_claim: 0.05
+claim_bonus_cap: 0.15
+
+selection:
+  # Candidates researched each post-market shift; the first `theses` with at least one
+  # verified claim become theses.
+  shortlist: 5
+  theses: 3
+
+lanes:
+  catalyst:
+    weight: 1.0
+    rules: [filing, earnings]
+  screen:
+    weight: 0.9
+    rules: [move_vs_prior_close, gap_open, range_break, volume_pace, new_52w, iv_rank_extreme, relative_strength]
+  commodity:
+    weight: 1.0
+    rules: [cot_extreme, eia_surprise]
+    # Tier 1 groups whose triggers route here instead of screen or catalyst.
+    groups: [metals, levered_metals, energy]
+  power_grid:
+    weight: 1.0
+    groups: [power_grid]
+  policy:
+    weight: 0.8
+  macro:
+    weight: 0.8
+  event_additions:
+    weight: 0.9
+    # Hits on names outside Tier 0-1 (Tier 2 or untracked) route here.
+    rules: [filing, earnings, volume_pace, move_vs_prior_close]
+
+# Macro lane: tradeable proxies for macro symbols that trigger watch rules, and FRED
+# screens on 20-day changes.
+macro:
+  symbol_proxies:
+    ^TNX: [TLT]
+    DX-Y.NYB: [UUP, GLD]
+    ^VIX: [SPY]
+  fred:
+    DFII10:
+      label: 10-year TIPS real yield
+      unit: bp
+      change_days: 20
+      threshold: 25
+      scale: 15
+      when_down: [GLD, SLV]
+      when_up: [UUP]
+    DGS10:
+      label: 10-year Treasury yield
+      unit: bp
+      change_days: 20
+      threshold: 30
+      scale: 20
+      when_down: [TLT, XLU]
+      when_up: [KRE]
+    DTWEXBGS:
+      label: Broad trade-weighted dollar
+      unit: pct
+      change_days: 20
+      threshold: 2.0
+      scale: 1.5
+      when_down: [GLD, EEM]
+      when_up: [UUP]
+
+# Power and grid lane: real-time hub price spikes. The latest day's peak must exceed the
+# median daily peak of the prior days by `ratio`; screens stay quiet until `min_days` of
+# history exist.
+grid:
+  min_days: 7
+  ratio: 2.0
+  scale: 1.0
+  instruments:
+    ercot: [VST, NRG, TLN]
+    miso: [CEG, XLU]
+    caiso: [XLU]

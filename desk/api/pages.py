@@ -16,6 +16,7 @@ from desk.artifacts.brief import Brief, FactSnapshot, TriageLabel
 from desk.artifacts.raw_record import RawRecord
 from desk.artifacts.research import Claim, Dossier, VerifiedClaim
 from desk.artifacts.store import ArtifactNotFoundError, get_artifact
+from desk.artifacts.thesis import Thesis
 from desk.artifacts.trigger import Trigger
 from desk.config import load_schedule
 
@@ -265,5 +266,91 @@ def pages_router(engine: Engine) -> APIRouter:
             f"{_esc(dossier.prompt_version)}.</p></main>"
         )
         return _page(f"{dossier.subject} research", "".join(body))
+
+    @router.get("/theses/{thesis_id}", response_class=HTMLResponse)
+    def thesis_page(thesis_id: UUID) -> str:
+        thesis = load(thesis_id)
+        if not isinstance(thesis, Thesis):
+            raise HTTPException(status_code=404, detail="not a thesis")
+        history = [thesis]
+        while history[-1].previous_id is not None and len(history) < 50:
+            earlier = load(history[-1].previous_id)
+            assert isinstance(earlier, Thesis)
+            history.append(earlier)
+        when = thesis.created_at.astimezone(tz)
+        title = f"{thesis.primary_instrument} {thesis.direction}"
+        body = [_header(title, f"{when:%a %b} {when.day}, {when:%H:%M} ET"), "<main>"]
+        if thesis.status.value == "failed":
+            body.append(f'<div class="banner">Thesis writing failed: {_esc(thesis.error)}</div>')
+        facts = [
+            ("State", thesis.state),
+            ("Origin", thesis.origin),
+            ("Instruments", ", ".join(thesis.instruments)),
+            ("Horizon", thesis.horizon or "-"),
+            ("Review by", thesis.review_by or "-"),
+            ("Conviction", f"{thesis.conviction}/5" if thesis.conviction else "-"),
+        ]
+        if thesis.invalidation is not None:
+            inv = thesis.invalidation
+            facts += [
+                (
+                    "Hard line",
+                    f"{inv.hard.instrument} daily close {inv.hard.operator} {inv.hard.level} "
+                    f"({inv.hard.level_ref})",
+                ),
+                (
+                    "Warning",
+                    f"{inv.warning.instrument} price {inv.warning.operator} "
+                    f"{inv.warning.level} ({inv.warning.level_ref})",
+                ),
+                ("Time limit", inv.time_limit or "-"),
+            ]
+        rows = "".join(f"<tr><td>{_esc(k)}</td><td>{_esc(v)}</td></tr>" for k, v in facts)
+        body.append(
+            f"<section><h2>Thesis</h2><ul><li>{_esc(thesis.statement)}</li></ul>"
+            f'<div class="scroll"><table>{rows}</table></div></section>'
+        )
+        drivers = "".join(
+            f'<li>{_esc(d.statement)} <span class="muted">({_esc(d.metric)}, '
+            f"{_esc(d.source)})</span></li>"
+            for d in thesis.drivers
+        )
+        body.append(f"<section><h2>Drivers</h2><ul>{drivers}</ul></section>")
+        if thesis.entry_conditions or thesis.catalysts:
+            items = "".join(f"<li>{_esc(e)}</li>" for e in thesis.entry_conditions)
+            items += "".join(
+                f'<li>{_esc(c.name)} <span class="muted">{_esc(c.on)}</span></li>'
+                for c in thesis.catalysts
+            )
+            body.append(f"<section><h2>Entry and catalysts</h2><ul>{items}</ul></section>")
+        evidence = []
+        for verified_id in thesis.evidence:
+            verified = load(verified_id)
+            if not isinstance(verified, VerifiedClaim):
+                continue
+            claim = load(verified.claim_id)
+            statement = claim.statement if isinstance(claim, Claim) else "-"
+            evidence.append(
+                f'<li><span class="pill">{_esc(verified.verdict)}</span> {_esc(statement)}</li>'
+            )
+        body.append(
+            "<section><h2>Evidence</h2><ul>"
+            + ("".join(evidence) or '<li class="muted">No verified claims yet.</li>')
+            + "</ul></section>"
+        )
+        versions = "".join(
+            f'<tr><td><a href="/theses/{v.id}">{v.created_at.astimezone(tz):%b %d %H:%M}</a>'
+            f"</td><td>{_esc(v.state)}</td><td>{_esc(v.change_note or v.produced_by)}</td></tr>"
+            for v in history
+        )
+        body.append(
+            '<section><h2>History</h2><div class="scroll"><table><tr><th>Version</th>'
+            f"<th>State</th><th>Change</th></tr>{versions}</table></div></section>"
+        )
+        body.append(
+            f'<p class="muted">Model {_esc(thesis.model)}, prompt '
+            f"{_esc(thesis.prompt_version)}.</p></main>"
+        )
+        return _page(title, "".join(body))
 
     return router

@@ -8,7 +8,6 @@ from desk.desks.research import (
     Source,
     check_draft,
     combine_importance,
-    play_score,
 )
 
 FILING = (
@@ -45,13 +44,6 @@ def test_combine_importance_has_diminishing_returns() -> None:
     assert combine_importance([]) == 0.0
     assert combine_importance([0.5, 0.5]) == 0.75
     assert combine_importance([1.5]) == 1.0
-
-
-def test_play_score_adds_capped_news_bonus_and_tier_factor() -> None:
-    assert play_score([0.5], 0, 1) == 0.5
-    assert play_score([0.5], 2, 1) == 0.6
-    assert play_score([0.5], 50, 1) == 0.7
-    assert play_score([0.5], 0, 2) == 0.4
 
 
 def test_clean_draft_passes() -> None:

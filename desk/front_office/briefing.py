@@ -12,15 +12,18 @@ from datetime import UTC, datetime, time, timedelta
 from decimal import Decimal
 from typing import Any
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, Field
 from sqlalchemy import Connection, Engine, text
 
 from desk.artifacts.base import ArtifactStatus
 from desk.artifacts.brief import Brief, BriefSection, FactSnapshot, SnapshotFact
-from desk.artifacts.store import append_artifact
+from desk.artifacts.store import append_artifact, get_artifact
+from desk.artifacts.thesis import Thesis
 from desk.collectors.holdings import latest_snapshots
 from desk.config import ChatModel
+from desk.desks.idea.status import open_theses, warning_flags
 from desk.front_office.notify import NotifyConfig, NtfyClient, record_push
 from desk.llm.client import OllamaChat, StructuredResult
 from desk.llm.facts import Fact, FactTable
@@ -379,6 +382,68 @@ def _claim_facts(conn: Connection, inputs: BriefingInputs, covers_from: datetime
         )
 
 
+# --- Theses -------------------------------------------------------------------------------
+
+
+def thesis_line(thesis: Thesis) -> str:
+    """One code-written line per thesis; every number comes from the stored thesis."""
+    parts = [f"{thesis.primary_instrument} {thesis.direction}: {thesis.statement}"]
+    if thesis.invalidation is not None:
+        hard, warning = thesis.invalidation.hard, thesis.invalidation.warning
+        parts.append(
+            f"Wrong on a daily close {hard.operator} ${hard.level:,}; "
+            f"warning {warning.operator} ${warning.level:,}."
+        )
+    if thesis.review_by is not None:
+        parts.append(f"Review by {thesis.review_by:%b} {thesis.review_by.day}.")
+    if thesis.conviction is not None:
+        parts.append(f"Conviction {thesis.conviction}/5.")
+    return " ".join(parts)
+
+
+@dataclass
+class ThesisSections:
+    new_ideas: list[str] = field(default_factory=list)
+    yours: list[str] = field(default_factory=list)
+    ids: list[UUID] = field(default_factory=list)
+
+
+def thesis_sections(conn: Connection, tz: ZoneInfo, covers_from: datetime) -> ThesisSections:
+    sections = ThesisSections()
+    flagged = {flag.thesis_id: flag for flag in warning_flags(conn, tz)}
+    for thesis in open_theses(conn):
+        if thesis.state == "draft":
+            continue
+        line = thesis_line(thesis)
+        flag = flagged.get(thesis.id)
+        if flag is not None:
+            line += (
+                f" Warning zone: {flag.instrument} at ${flag.price:,.2f} is {flag.operator} "
+                f"${flag.level:,}."
+            )
+        if thesis.origin == "jon":
+            sections.yours.append(f"[{thesis.state}] {line}")
+            sections.ids.append(thesis.id)
+        elif thesis.created_at >= covers_from and thesis.previous_id is None:
+            sections.new_ideas.append(f"({thesis.origin} lane) {line}")
+            sections.ids.append(thesis.id)
+    for row in conn.execute(
+        text(
+            "SELECT id FROM artifacts WHERE kind = 'thesis' AND status = 'ok' "
+            "AND payload->>'state' = 'invalidated' AND payload->>'origin' = 'jon' "
+            "AND created_at >= :since ORDER BY created_at"
+        ),
+        {"since": covers_from},
+    ):
+        invalidated = get_artifact(conn, row.id)
+        assert isinstance(invalidated, Thesis)
+        sections.yours.append(
+            f"[invalidated] {invalidated.primary_instrument}: {invalidated.change_note}"
+        )
+        sections.ids.append(invalidated.id)
+    return sections
+
+
 # --- Build --------------------------------------------------------------------------------
 
 
@@ -491,13 +556,24 @@ async def build_briefing(
     else:
         sections = _fallback_sections(table, inputs)
         status, error = ArtifactStatus.FAILED, f"model failed twice: {result.error}"
+    with engine.connect() as conn:
+        theses = thesis_sections(conn, calendar.tz, covers_from)
+    sections.append(
+        BriefSection(
+            title="New ideas",
+            lines=tuple(theses.new_ideas) or ("No new theses from the last post-market shift.",),
+        )
+    )
+    sections.append(
+        BriefSection(title="Your theses", lines=tuple(theses.yours) or ("No open theses.",))
+    )
     sections.append(BriefSection(title="Calendar", lines=calendar_lines))
 
     brief = Brief(
         produced_by="front_office.briefing",
         runtime_ms=int((datetime.now(UTC) - started).total_seconds() * 1000),
         shift_id=shift_id,
-        parents=(snapshot.id,),
+        parents=(snapshot.id, *theses.ids),
         model=model.model,
         prompt_version=prompt.version,
         tokens_in=result.usage.tokens_in,

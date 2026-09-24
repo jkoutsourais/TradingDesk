@@ -9,7 +9,8 @@ One process, two parts:
 Every shift starts by unloading all Ollama models (the GPU rule), then runs its desks:
   pre_market   triage rounds on the small model
   briefing     morning brief on the deep model, pushed through ntfy
-  post_market  research on the deep model, then fact-check on the small model
+  post_market  idea lanes, research (deep), fact-check (small), theses (deep) and
+               thesis state checks; see desk.desks.idea.run
 """
 
 import asyncio
@@ -34,9 +35,10 @@ from desk.config import (
     load_universe,
 )
 from desk.db import make_engine
-from desk.desks.factcheck import run_factcheck
-from desk.desks.research import run_research
+from desk.desks.idea.lanes import LanesConfig, load_lanes_config
+from desk.desks.idea.run import run_post_market
 from desk.front_office.briefing import build_briefing, push_briefing
+from desk.front_office.intake import process_pending
 from desk.front_office.notify import NotifyConfig, NtfyClient, load_notify_config
 from desk.llm.client import OllamaChat, Usage
 from desk.llm.embeddings import OllamaEmbedder
@@ -319,6 +321,10 @@ class Deps:
     models: ModelsConfig
     calendar: MarketCalendar
     tiers: TiersConfig
+    universe: UniverseConfig
+    watch: WatchConfig
+    lanes: LanesConfig
+    futures: frozenset[str]
     notify: NotifyConfig
     ntfy: NtfyClient | None
 
@@ -438,7 +444,7 @@ class Worker:
                     notes.append("not pushed: NTFY_TOPIC is not set")
                 await deps.chat.unload(deps.models.deep.model)
             elif kind == "post_market":
-                notes += await self._research_and_factcheck(job.shift_id, report)
+                notes += await self._post_market(job.shift_id, report)
             else:
                 notes.append("no desks for this shift yet")
         except Exception:
@@ -450,38 +456,23 @@ class Worker:
         )
         return report
 
-    async def _research_and_factcheck(self, shift_id: UUID, report: RunReport) -> list[str]:
+    async def _post_market(self, shift_id: UUID, report: RunReport) -> list[str]:
         deps = self._deps
-        research = await run_research(
+        outcome = await run_post_market(
             self._engine,
             deps.chat,
-            deps.models.deep,
             deps.embedder,
-            deps.models.embedding,
+            deps.models,
+            deps.lanes,
+            deps.watch,
             deps.tiers,
+            deps.universe,
+            deps.calendar,
             datetime.now(UTC),
             shift_id,
         )
-        await deps.chat.unload(deps.models.deep.model)
-        notes = [
-            f"research: {len(research.dossiers)} dossiers, {research.claims} claims, "
-            f"{len(research.failed)} failed"
-        ]
-        notes += research.failed[:5]
-        check = await run_factcheck(
-            self._engine, deps.chat, deps.models.small, deps.calendar.tz, shift_id
-        )
-        await deps.chat.unload(deps.models.small.model)
-        notes.append(
-            f"fact-check: {check.verified} verified, {check.corrected} corrected, "
-            f"{check.rejected} rejected, {check.failed} failed"
-        )
-        report.usage = check.usage
-        if check.error:
-            report.error = check.error
-        elif research.failed and not research.dossiers:
-            report.error = "research produced no dossiers"
-        return notes
+        report.error = outcome.error
+        return outcome.notes
 
     async def _run(self, job: queue.Job) -> RunReport:
         if job.kind == "shift":
@@ -489,7 +480,18 @@ class Worker:
         if job.kind == "triage":
             if await asyncio.to_thread(self._shift_running):
                 return RunReport("paused: a shift holds the GPU")
-            return await self._triage()
+            report = await self._triage()
+            # Thesis intake shares the triage tick: same small model, same shift pause.
+            intake = await process_pending(
+                self._engine,
+                self._deps.chat,
+                self._deps.models.small,
+                datetime.now(UTC).astimezone(self._deps.calendar.tz).date(),
+                self._deps.futures,
+            )
+            if intake.drafted or intake.failed:
+                report.summary += f"; intake drafted {intake.drafted}, failed {intake.failed}"
+            return report
         if job.kind == "scan":
             outcome = await asyncio.to_thread(
                 self._scanner.run, job.payload, datetime.now(UTC), job.shift_id
@@ -572,7 +574,8 @@ async def run(engine: Engine, settings: Settings) -> None:
     tiers = load_tiers()
     models = load_models()
     planner = Planner(calendar, config)
-    scanner = Scanner(engine, calendar, config, tiers, load_universe())
+    universe = load_universe()
+    scanner = Scanner(engine, calendar, config, tiers, universe)
     ntfy = (
         NtfyClient(settings.ntfy_server, settings.ntfy_topic.get_secret_value())
         if settings.ntfy_topic
@@ -587,6 +590,10 @@ async def run(engine: Engine, settings: Settings) -> None:
         models=models,
         calendar=calendar,
         tiers=tiers,
+        universe=universe,
+        watch=config,
+        lanes=load_lanes_config(),
+        futures=frozenset(s for s in tiers.tier_1_symbols() if s.startswith("/")),
         notify=load_notify_config(),
         ntfy=ntfy,
     )

@@ -64,6 +64,8 @@
 </header>
 <main>
   <section><h2>Triggers, last 24 hours</h2><div id="triggers" class="scroll"></div></section>
+  <section><h2>Theses</h2><div id="theses" class="scroll"></div></section>
+  <section><h2>Idea lanes, latest shift</h2><div id="funnel" class="scroll"></div></section>
   <section><h2>Research, last 36 hours</h2><div id="research" class="scroll"></div></section>
   <section><h2>Shifts and calendar</h2><div id="shifts" class="scroll"></div></section>
   <section><h2>Collectors</h2><div id="collectors" class="scroll"></div></section>
@@ -109,6 +111,29 @@
         <td>${t.tier === null ? "-" : esc(t.tier)}</td>
         <td class="muted">${esc(t.rule)}</td>
         <td class="wrap" style="color: var(--fg)">${esc(t.summary)}</td></tr>`));
+
+    const ideas = data.ideas;
+    document.getElementById("theses").innerHTML = table(
+      `<th>Thesis</th><th>Origin</th><th>Side</th><th>State</th><th class="num">Conv.</th>
+       <th class="num">Hard</th><th class="num">Warning</th><th class="num">Evidence</th>
+       <th>Review by</th><th>Statement</th>`,
+      ideas.theses.map((t) => `<tr>
+        <td><a href="/theses/${esc(t.id)}">${esc(t.instrument)}</a></td>
+        <td>${esc(t.origin)}</td><td>${esc(t.direction)}</td><td>${esc(t.state)}</td>
+        <td class="num">${t.conviction ?? "-"}</td>
+        <td class="num">${t.hard === null ? "-" : num(t.hard)}</td>
+        <td class="num">${t.warning === null ? "-" : num(t.warning)}</td>
+        <td class="num">${count(t.evidence)}</td>
+        <td>${esc(t.review_by ?? "-")}</td>
+        <td class="wrap">${esc(t.statement)}</td></tr>`));
+    document.getElementById("funnel").innerHTML = (ideas.selection_at
+      ? `<div class="empty">Selection ${time(ideas.selection_at)} ET</div>` : "") + table(
+      `<th>Lane</th><th>Instrument</th><th class="num">Score</th><th>Outcome</th><th>Driver</th>`,
+      ideas.funnel.map((c) => `<tr>
+        <td>${esc(c.lane)}</td><td>${esc(c.instrument)}</td>
+        <td class="num">${num(c.score)}</td>
+        <td>${c.outcome === "thesis" ? '<span class="dot ok"></span>thesis' : esc(c.outcome)}</td>
+        <td class="wrap muted">${esc(c.driver)}</td></tr>`));
 
     document.getElementById("research").innerHTML = table(
       `<th>Subject</th><th>Kind</th><th class="num">Score</th><th class="num">Claims</th>

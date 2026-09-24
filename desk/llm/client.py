@@ -123,6 +123,6 @@ def _retry_instruction(problems: list[str]) -> str:
     return (
         "Your reply had these problems:\n"
         f"{listed}\n"
-        "Return the corrected reply as JSON matching the same schema. Do not write any "
-        "number yourself; refer to facts only by their {placeholder}."
+        "Return the corrected reply as JSON matching the same schema, following the "
+        "rules in the system message."
     )

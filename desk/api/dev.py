@@ -16,6 +16,7 @@ from sqlalchemy import Engine, text
 
 from desk.collectors.holdings import latest_snapshots
 from desk.config import ScheduleConfig, load_schedule
+from desk.desks.idea.status import open_theses
 from desk.settings import REPO_ROOT
 
 QUOTE_SYMBOLS = ("SPY", "QQQ", "GLD", "SLV", "/GC", "/SI", "/CL", "/NG", "XLE", "XLU")
@@ -214,6 +215,59 @@ def _research(conn: Any, now: datetime) -> list[dict[str, Any]]:
     return dossiers
 
 
+def _ideas(conn: Any) -> dict[str, Any]:
+    """The latest shift's lane funnel and every open thesis."""
+    selection = conn.execute(
+        text(
+            "SELECT id, created_at, payload FROM artifacts WHERE kind = 'idea_selection' "
+            "ORDER BY created_at DESC LIMIT 1"
+        )
+    ).first()
+    funnel: list[dict[str, Any]] = []
+    if selection is not None:
+        dropped = {d["candidate_id"]: d["reason"] for d in selection.payload["dropped"]}
+        selected = set(selection.payload["selected"])
+        rows = conn.execute(
+            text(
+                "SELECT c.id::text AS id, c.payload->>'lane' AS lane, "
+                "c.payload->>'instrument' AS instrument, (c.payload->>'score')::float AS score, "
+                "c.payload->>'driver' AS driver FROM artifact_parents p "
+                "JOIN artifacts c ON c.id = p.parent_id WHERE p.child_id = :id "
+                "ORDER BY (c.payload->>'score')::float DESC"
+            ),
+            {"id": selection.id},
+        ).mappings()
+        funnel = [
+            {
+                **row,
+                "outcome": "thesis" if row["id"] in selected else dropped.get(row["id"], "-"),
+            }
+            for row in rows
+        ]
+    theses = [
+        {
+            "id": t.id,
+            "created_at": t.created_at,
+            "instrument": t.primary_instrument,
+            "origin": t.origin,
+            "direction": t.direction,
+            "state": t.state,
+            "conviction": t.conviction,
+            "review_by": t.review_by,
+            "hard": t.invalidation.hard.level if t.invalidation else None,
+            "warning": t.invalidation.warning.level if t.invalidation else None,
+            "evidence": len(t.evidence),
+            "statement": t.statement,
+        }
+        for t in open_theses(conn)
+    ]
+    return {
+        "selection_at": selection.created_at if selection is not None else None,
+        "funnel": funnel,
+        "theses": theses,
+    }
+
+
 def _commits() -> list[str]:
     try:
         completed = subprocess.run(
@@ -245,6 +299,7 @@ def build_status(engine: Engine, now: datetime | None = None) -> dict[str, Any]:
             "failures": _recent_failures(conn, now - timedelta(hours=6)),
             "watch": _watch(conn, now),
             "research": _research(conn, now),
+            "ideas": _ideas(conn),
             "commits": _commits(),
         }
 
