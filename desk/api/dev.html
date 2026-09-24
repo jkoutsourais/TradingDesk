@@ -64,6 +64,8 @@
 </header>
 <main>
   <section><h2>Triggers, last 24 hours</h2><div id="triggers" class="scroll"></div></section>
+  <section><h2>Holdings ratings</h2><div id="ratings" class="scroll"></div></section>
+  <section><h2>Debates</h2><div id="verdicts" class="scroll"></div></section>
   <section><h2>Theses</h2><div id="theses" class="scroll"></div></section>
   <section><h2>Idea lanes, latest shift</h2><div id="funnel" class="scroll"></div></section>
   <section><h2>Research, last 36 hours</h2><div id="research" class="scroll"></div></section>
@@ -111,6 +113,28 @@
         <td>${t.tier === null ? "-" : esc(t.tier)}</td>
         <td class="muted">${esc(t.rule)}</td>
         <td class="wrap" style="color: var(--fg)">${esc(t.summary)}</td></tr>`));
+
+    const analyst = data.analyst;
+    const ratingName = {buy_add: "Buy/Add", hold: "Hold", trim: "Trim", sell: "Sell"};
+    document.getElementById("ratings").innerHTML = table(
+      `<th>Holding</th><th>Rating</th><th>Was</th><th>Confidence</th><th>Flags</th>
+       <th>Action</th><th>When</th>`,
+      analyst.ratings.map((r) => `<tr>
+        <td>${esc(r.subject)}</td>
+        <td>${r.status === "failed" ? '<span class="dot failing"></span>' : ""}${esc(ratingName[r.rating] || r.rating)}${r.judged ? ` <span class="muted">(judge: ${esc(ratingName[r.judged])})</span>` : ""}</td>
+        <td>${esc(ratingName[r.previous] || "-")}</td>
+        <td>${esc(r.confidence)}</td>
+        <td class="wrap muted">${esc(r.flags.join("; ") || "-")}</td>
+        <td class="wrap">${esc(r.error || r.action)}</td>
+        <td>${time(r.created_at)}</td></tr>`));
+    document.getElementById("verdicts").innerHTML = table(
+      `<th>Subject</th><th>Verdict</th><th>Confidence</th><th>Conviction</th>
+       <th>Evidence</th><th>Rebuttal</th><th>Risk/reward</th><th>When</th>`,
+      analyst.verdicts.map((v) => `<tr>
+        <td><a href="/debates/${esc(v.id)}">${esc(v.subject)}</a></td>
+        <td>${esc(v.verdict)}</td><td>${esc(v.confidence)}</td><td>${esc(v.conviction ?? "-")}</td>
+        <td>${esc(v.rubric.evidence_quality)}</td><td>${esc(v.rubric.rebuttal)}</td>
+        <td>${esc(v.rubric.risk_reward)}</td><td>${time(v.created_at)}</td></tr>`));
 
     const ideas = data.ideas;
     document.getElementById("theses").innerHTML = table(

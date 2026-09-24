@@ -7,7 +7,7 @@ One process, two parts:
   workers  claim jobs from the Postgres queue, run them, and record each run in job_runs
 
 Every shift starts by unloading all Ollama models (the GPU rule), then runs its desks:
-  pre_market   triage rounds on the small model
+  pre_market   triage rounds (small), then holdings ratings and thesis debates (deep)
   briefing     morning brief on the deep model, pushed through ntfy
   post_market  idea lanes, research (deep), fact-check (small), theses (deep) and
                thesis state checks; see desk.desks.idea.run
@@ -35,6 +35,9 @@ from desk.config import (
     load_universe,
 )
 from desk.db import make_engine
+from desk.desks.analyst.personas import Persona, load_personas
+from desk.desks.analyst.run import run_analyst_desks
+from desk.desks.holdings.flags import HoldingsConfig, load_holdings_config
 from desk.desks.idea.lanes import LanesConfig, load_lanes_config
 from desk.desks.idea.run import run_post_market
 from desk.front_office.briefing import build_briefing, push_briefing
@@ -72,6 +75,8 @@ JOB_TIMEOUT_S = 240.0
 PLAN_DAYS_AHEAD = 8
 DAILY_CACHE_TTL_S = 3600.0
 SHIFT_TIMEOUT_S = 1800.0
+# The pre-market shift stops starting work before the briefing; this is the hard stop.
+PRE_MARKET_TIMEOUT_S = 3300.0
 TRIAGE_SECONDS = 60
 # The pre-market shift clears the overnight triage backlog in at most this many batches.
 PRE_MARKET_TRIAGE_ROUNDS = 8
@@ -324,6 +329,8 @@ class Deps:
     universe: UniverseConfig
     watch: WatchConfig
     lanes: LanesConfig
+    personas: dict[str, Persona]
+    holdings: HoldingsConfig
     futures: frozenset[str]
     notify: NotifyConfig
     ntfy: NtfyClient | None
@@ -426,6 +433,7 @@ class Worker:
                         report.error = triage.error
                         break
                 await deps.chat.unload(deps.models.small.model)
+                notes += await self._analyst_desks(job.shift_id, report)
             elif kind == "briefing":
                 outcome = await build_briefing(
                     self._engine,
@@ -455,6 +463,34 @@ class Worker:
             self._set_shift, job.shift_id, "failed" if report.error else "ok", report.summary[:1000]
         )
         return report
+
+    async def _analyst_desks(self, shift_id: UUID, report: RunReport) -> list[str]:
+        deps = self._deps
+        now = datetime.now(UTC)
+        schedule = deps.watch.schedule
+        briefing_at = datetime.combine(
+            now.astimezone(deps.calendar.tz).date(),
+            schedule.shifts["briefing"],
+            deps.calendar.tz,
+        )
+        deadline = briefing_at - timedelta(minutes=schedule.analyst_stop_before_briefing_minutes)
+        outcome = await run_analyst_desks(
+            self._engine,
+            deps.chat,
+            deps.models.deep,
+            deps.personas,
+            deps.tiers,
+            deps.universe,
+            deps.holdings,
+            deps.calendar,
+            now,
+            deadline,
+            shift_id,
+        )
+        await deps.chat.unload(deps.models.deep.model)
+        if outcome.errors and report.error is None:
+            report.error = "; ".join(outcome.errors)[:1000]
+        return outcome.notes + outcome.errors[:5]
 
     async def _post_market(self, shift_id: UUID, report: RunReport) -> list[str]:
         deps = self._deps
@@ -512,7 +548,10 @@ class Worker:
             name = f"{job.kind}:{job.payload.get('group') or job.payload.get('kind') or 'run'}"
             run_id = await asyncio.to_thread(self._start, job, name)
             try:
-                timeout = SHIFT_TIMEOUT_S if job.kind == "shift" else JOB_TIMEOUT_S
+                timeout = JOB_TIMEOUT_S
+                if job.kind == "shift":
+                    pre_market = job.payload.get("kind") == "pre_market"
+                    timeout = PRE_MARKET_TIMEOUT_S if pre_market else SHIFT_TIMEOUT_S
                 async with asyncio.timeout(timeout):
                     report = await self._run(job)
             except asyncio.CancelledError:
@@ -593,6 +632,8 @@ async def run(engine: Engine, settings: Settings) -> None:
         universe=universe,
         watch=config,
         lanes=load_lanes_config(),
+        personas=load_personas(),
+        holdings=load_holdings_config(),
         futures=frozenset(s for s in tiers.tier_1_symbols() if s.startswith("/")),
         notify=load_notify_config(),
         ntfy=ntfy,

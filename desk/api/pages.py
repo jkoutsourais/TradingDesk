@@ -12,6 +12,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import Engine, text
 
+from desk.artifacts.analyst import AnalystView, DebateVerdict
 from desk.artifacts.brief import Brief, FactSnapshot, TriageLabel
 from desk.artifacts.raw_record import RawRecord
 from desk.artifacts.research import Claim, Dossier, VerifiedClaim
@@ -350,6 +351,59 @@ def pages_router(engine: Engine) -> APIRouter:
         body.append(
             f'<p class="muted">Model {_esc(thesis.model)}, prompt '
             f"{_esc(thesis.prompt_version)}.</p></main>"
+        )
+        return _page(title, "".join(body))
+
+    def _points(points: Any) -> str:
+        items = []
+        for point in points:
+            sources = []
+            for claim_id in point.claim_ids:
+                verified = load(claim_id)
+                claim = load(verified.claim_id) if isinstance(verified, VerifiedClaim) else None
+                label = claim.statement if isinstance(claim, Claim) else str(claim_id)
+                sources.append(f'<span class="pill">claim</span> {_esc(label)}')
+            sources += [f'<span class="muted">{_esc(ref)}</span>' for ref in point.fact_refs]
+            items.append(
+                f'<li>{_esc(point.text)}<div class="muted">{"<br>".join(sources)}</div></li>'
+            )
+        return "".join(items)
+
+    @router.get("/debates/{verdict_id}", response_class=HTMLResponse)
+    def debate_page(verdict_id: UUID) -> str:
+        verdict = load(verdict_id)
+        if not isinstance(verdict, DebateVerdict):
+            raise HTTPException(status_code=404, detail="not a debate")
+        when = verdict.created_at.astimezone(tz)
+        title = f"{verdict.subject} debate"
+        rubric = verdict.rubric
+        body = [
+            _header(title, f"{when:%a %b} {when.day}, {when:%H:%M} ET"),
+            "<main>",
+            f'<section><h2>Verdict</h2><ul><li><span class="pill">{_esc(verdict.verdict)}'
+            f"</span> {_esc(verdict.confidence_label)} confidence"
+            + (f", conviction {verdict.conviction}/5" if verdict.conviction else "")
+            + f'. <a href="/theses/{verdict.thesis_id}">Thesis</a></li>'
+            f'<li class="muted">Evidence {_esc(rubric.evidence_quality)}, rebuttal '
+            f"{_esc(rubric.rebuttal)}, risk/reward {_esc(rubric.risk_reward)}</li>"
+            f"{_points(verdict.reasons)}<li>Dissent: {_esc(verdict.dissent)}</li></ul></section>",
+        ]
+        for view_id in verdict.view_ids:
+            view = load(view_id)
+            if isinstance(view, AnalystView):
+                body.append(
+                    f"<section><h2>{_esc(view.persona)} ({_esc(view.stance)}, "
+                    f"{_esc(view.confidence_label)})</h2><ul>{_points(view.points)}</ul></section>"
+                )
+        for name, points in (
+            ("Bull", verdict.bull),
+            ("Bear", verdict.bear),
+            ("Bull rebuttal", verdict.rebuttal),
+        ):
+            body.append(f"<section><h2>{name}</h2><ul>{_points(points)}</ul></section>")
+        body.append(
+            f'<p class="muted">Model {_esc(verdict.model)}, prompt '
+            f"{_esc(verdict.prompt_version)}.</p></main>"
         )
         return _page(title, "".join(body))
 

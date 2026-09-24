@@ -1,0 +1,37 @@
+# Holdings desk risk flags (Phase 6). Code checks each holding before the judge rates it;
+# a flag with a forcing threshold overrides the judge with a more defensive rating.
+# Phase 7's risk desk (config/risk.yaml) takes over account-level caps.
+
+concentration:
+  # Position market value as a share of its account's net liquidation, in percent.
+  warn_pct: 20
+  trim_pct: 35
+
+levered_funds:
+  # Daily-reset leveraged ETFs and their leverage; decay grows with holding time.
+  leverage:
+    NUGT: 2
+    JNUG: 2
+    AGQ: 2
+    UGL: 2
+    TQQQ: 3
+    SQQQ: 3
+    SOXL: 3
+    SOXS: 3
+    UPRO: 3
+    SPXU: 3
+    TNA: 3
+    FAS: 3
+    ERX: 2
+    BOIL: 2
+    KOLD: 2
+    UCO: 2
+    SCO: 2
+  # Days held (from the first broker snapshot that shows the position).
+  warn_days: 5
+  trim_days: 15
+
+options:
+  # Days to expiry.
+  warn_days: 10
+  sell_days: 3

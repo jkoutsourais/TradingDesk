@@ -88,3 +88,10 @@ def test_duplicate_fact_ids_rejected() -> None:
 def test_fact_needs_source() -> None:
     with pytest.raises(ValueError, match="source"):
         Fact("x", Decimal(1), "", "1", "x", "")
+
+
+def test_render_normalizes_typographic_hyphens_and_spaces() -> None:
+    from desk.llm.facts import FactTable
+
+    table = FactTable([])
+    assert table.render("20" + chr(0x2011) + "day" + chr(0x202F) + "range") == "20-day range"

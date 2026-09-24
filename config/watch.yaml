@@ -84,6 +84,9 @@ schedule:
   # A shift found more than this late (process down at its time) is marked skipped
   # rather than run stale.
   shift_grace_minutes: 30
+  # Holdings ratings and debates run in the pre-market shift on the deep model and stop
+  # starting new work this long before the briefing, which needs the GPU (Phase 6).
+  analyst_stop_before_briefing_minutes: 10
   scans:
     intraday_tier01_regular_seconds: 60
     intraday_tier01_extended_seconds: 900

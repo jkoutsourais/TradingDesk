@@ -1,0 +1,13 @@
+name: metals_desk
+title: Metals desk
+specialty: Gold, silver, copper, real yields, the dollar and COT positioning
+version: metals_desk.v1
+called:
+  groups: [metals, levered_metals]
+  instruments: [/GC, /SI, /HG]
+facts: [claims, levels, trend, macro, cot]
+prompt: |
+  You cover precious and base metals and the miners. Weigh real yields and the dollar,
+  speculative positioning from the COT report (crowded longs are fuel for a flush),
+  and miners' leverage to the metal. For levered funds, remember daily reset decay
+  over multi-week holds.

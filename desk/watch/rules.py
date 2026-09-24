@@ -52,6 +52,8 @@ class WatchSchedule(BaseModel):
     sunday_futures: time
     post_market_after_early_close_minutes: int = Field(ge=0)
     shift_grace_minutes: int = Field(gt=0)
+    # Pre-market ratings and debates start no new work this long before the briefing.
+    analyst_stop_before_briefing_minutes: int = Field(gt=0)
     scans: ScanCadence
 
 

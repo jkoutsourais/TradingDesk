@@ -17,12 +17,14 @@ from zoneinfo import ZoneInfo
 from pydantic import BaseModel, Field
 from sqlalchemy import Connection, Engine, text
 
+from desk.artifacts.analyst import DebateVerdict, HoldingRating
 from desk.artifacts.base import ArtifactStatus
 from desk.artifacts.brief import Brief, BriefSection, FactSnapshot, SnapshotFact
 from desk.artifacts.store import append_artifact, get_artifact
 from desk.artifacts.thesis import Thesis
 from desk.collectors.holdings import latest_snapshots
 from desk.config import ChatModel
+from desk.desks.analyst.debate import chain_ids, latest_verdicts
 from desk.desks.idea.status import open_theses, warning_flags
 from desk.front_office.notify import NotifyConfig, NtfyClient, record_push
 from desk.llm.client import OllamaChat, StructuredResult
@@ -408,6 +410,27 @@ class ThesisSections:
     ids: list[UUID] = field(default_factory=list)
 
 
+def debate_note(conn: Connection, thesis: Thesis) -> tuple[str, UUID | None]:
+    """The latest verdict on any version of the thesis, with the bear's lead point."""
+    verdicts = latest_verdicts(conn)
+    for version in chain_ids(conn, thesis):
+        if version in verdicts:
+            verdict_id = verdicts[version][0]
+            verdict = get_artifact(conn, verdict_id)
+            assert isinstance(verdict, DebateVerdict)
+            note = f" Verdict: {verdict.verdict} ({verdict.confidence_label} confidence)."
+            if thesis.origin == "jon":
+                note += f" Bear: {verdict.bear[0].text}"
+            return note, verdict_id
+    return " Not debated yet.", None
+
+
+def chain_started(conn: Connection, thesis: Thesis) -> datetime:
+    first = chain_ids(conn, thesis)[-1]
+    started = conn.execute(text("SELECT created_at FROM artifacts WHERE id = :id"), {"id": first})
+    return started.scalar_one()  # type: ignore[no-any-return]
+
+
 def thesis_sections(conn: Connection, tz: ZoneInfo, covers_from: datetime) -> ThesisSections:
     sections = ThesisSections()
     flagged = {flag.thesis_id: flag for flag in warning_flags(conn, tz)}
@@ -415,6 +438,10 @@ def thesis_sections(conn: Connection, tz: ZoneInfo, covers_from: datetime) -> Th
         if thesis.state == "draft":
             continue
         line = thesis_line(thesis)
+        note, verdict_id = debate_note(conn, thesis)
+        line += note
+        if verdict_id is not None:
+            sections.ids.append(verdict_id)
         flag = flagged.get(thesis.id)
         if flag is not None:
             line += (
@@ -424,7 +451,7 @@ def thesis_sections(conn: Connection, tz: ZoneInfo, covers_from: datetime) -> Th
         if thesis.origin == "jon":
             sections.yours.append(f"[{thesis.state}] {line}")
             sections.ids.append(thesis.id)
-        elif thesis.created_at >= covers_from and thesis.previous_id is None:
+        elif chain_started(conn, thesis) >= covers_from:
             sections.new_ideas.append(f"({thesis.origin} lane) {line}")
             sections.ids.append(thesis.id)
     for row in conn.execute(
@@ -442,6 +469,39 @@ def thesis_sections(conn: Connection, tz: ZoneInfo, covers_from: datetime) -> Th
         )
         sections.ids.append(invalidated.id)
     return sections
+
+
+RATING_LABELS = {"buy_add": "Buy/Add", "hold": "Hold", "trim": "Trim", "sell": "Sell"}
+
+
+def rating_lines(conn: Connection, covers_from: datetime) -> tuple[list[str], list[UUID]]:
+    """One code-written line per holding from this morning's ratings."""
+    rows = conn.execute(
+        text(
+            "SELECT DISTINCT ON (payload->>'subject') id FROM artifacts "
+            "WHERE kind = 'holding_rating' AND created_at >= :since "
+            "ORDER BY payload->>'subject', created_at DESC"
+        ),
+        {"since": covers_from},
+    ).scalars()
+    lines, ids = [], []
+    for rating_id in rows:
+        rating = get_artifact(conn, rating_id)
+        assert isinstance(rating, HoldingRating)
+        label = RATING_LABELS[rating.rating]
+        line = f"{rating.subject}: {label} ({rating.confidence_label} confidence)"
+        if rating.previous_rating and rating.previous_rating != rating.rating:
+            line += f", changed from {RATING_LABELS[rating.previous_rating]}"
+        if rating.status is ArtifactStatus.FAILED:
+            line += ". Rating run failed; previous rating stands"
+        else:
+            line += f". {rating.reasons[0].text}"
+        line += f" Action: {rating.suggested_action}"
+        if rating.risk_flags:
+            line += " Flags: " + "; ".join(f.detail for f in rating.risk_flags) + "."
+        lines.append(line)
+        ids.append(rating.id)
+    return lines, ids
 
 
 # --- Build --------------------------------------------------------------------------------
@@ -558,6 +618,15 @@ async def build_briefing(
         status, error = ArtifactStatus.FAILED, f"model failed twice: {result.error}"
     with engine.connect() as conn:
         theses = thesis_sections(conn, calendar.tz, covers_from)
+        ratings, rating_ids = rating_lines(conn, covers_from)
+    theses.ids += rating_ids
+    sections.insert(
+        min(3, len(sections)),
+        BriefSection(
+            title="Holdings ratings",
+            lines=tuple(ratings) or ("No ratings from this morning's pre-market shift.",),
+        ),
+    )
     sections.append(
         BriefSection(
             title="New ideas",
@@ -573,7 +642,7 @@ async def build_briefing(
         produced_by="front_office.briefing",
         runtime_ms=int((datetime.now(UTC) - started).total_seconds() * 1000),
         shift_id=shift_id,
-        parents=(snapshot.id, *theses.ids),
+        parents=(snapshot.id, *dict.fromkeys(theses.ids)),
         model=model.model,
         prompt_version=prompt.version,
         tokens_in=result.usage.tokens_in,

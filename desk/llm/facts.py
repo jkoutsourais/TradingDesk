@@ -16,6 +16,17 @@ PLACEHOLDER = re.compile(r"\{([A-Za-z0-9_.:/^\-]+)\}")
 NUMBER = re.compile(r"\d+(?:[.,]\d+)*")
 
 
+# Typographic characters models emit that render badly in consoles and plain-text pushes:
+# non-breaking and figure hyphens, and narrow or non-breaking spaces.
+_TYPOGRAPHY = str.maketrans(
+    {chr(0x2010): "-", chr(0x2011): "-", chr(0x2012): "-", chr(0x202F): " ", chr(0x00A0): " "}
+)
+
+
+def plain(text: str) -> str:
+    return text.translate(_TYPOGRAPHY)
+
+
 class UnknownFactError(KeyError):
     pass
 
@@ -58,7 +69,7 @@ class FactTable:
             raise UnknownFactError(fact_id) from None
 
     def render(self, text: str) -> str:
-        return PLACEHOLDER.sub(lambda m: self.get(m.group(1)).display, text)
+        return plain(PLACEHOLDER.sub(lambda m: self.get(m.group(1)).display, text))
 
     def violations(self, text: str) -> list[str]:
         problems = [

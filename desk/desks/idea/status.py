@@ -24,7 +24,12 @@ VERSION_EXCLUDE = frozenset(
 
 
 def new_version(
-    thesis: Thesis, produced_by: str, change_note: str, shift_id: UUID | None = None, **updates: Any
+    thesis: Thesis,
+    produced_by: str,
+    change_note: str,
+    shift_id: UUID | None = None,
+    extra_parents: tuple[UUID, ...] = (),
+    **updates: Any,
 ) -> Thesis:
     fields = thesis.model_dump(exclude=set(VERSION_EXCLUDE))
     fields.update(updates)
@@ -35,7 +40,7 @@ def new_version(
             "produced_by": produced_by,
             "runtime_ms": 0,
             "shift_id": shift_id,
-            "parents": (thesis.id, *dict.fromkeys(e for e in evidence if e != thesis.id)),
+            "parents": tuple(dict.fromkeys((thesis.id, *extra_parents, *evidence))),
             "previous_id": thesis.id,
             "change_note": change_note,
         }

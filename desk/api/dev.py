@@ -268,6 +268,33 @@ def _ideas(conn: Any) -> dict[str, Any]:
     }
 
 
+def _analyst(conn: Any) -> dict[str, Any]:
+    """Latest holding ratings and the most recent debate verdicts."""
+    ratings = conn.execute(
+        text(
+            "SELECT DISTINCT ON (payload->>'subject') id, created_at, status, error, "
+            "payload->>'subject' AS subject, payload->>'rating' AS rating, "
+            "payload->>'previous_rating' AS previous, payload->>'judged_rating' AS judged, "
+            "payload->>'confidence_label' AS confidence, payload->'risk_flags' AS flags, "
+            "payload->>'suggested_action' AS action FROM artifacts "
+            "WHERE kind = 'holding_rating' ORDER BY payload->>'subject', created_at DESC"
+        )
+    ).mappings()
+    verdicts = conn.execute(
+        text(
+            "SELECT id, created_at, payload->>'subject' AS subject, "
+            "payload->>'thesis_id' AS thesis_id, payload->>'verdict' AS verdict, "
+            "payload->>'confidence_label' AS confidence, "
+            "payload->>'conviction_label' AS conviction, payload->'rubric' AS rubric "
+            "FROM artifacts WHERE kind = 'debate_verdict' ORDER BY created_at DESC LIMIT 20"
+        )
+    ).mappings()
+    return {
+        "ratings": [{**row, "flags": [f["detail"] for f in row["flags"] or []]} for row in ratings],
+        "verdicts": [dict(row) for row in verdicts],
+    }
+
+
 def _commits() -> list[str]:
     try:
         completed = subprocess.run(
@@ -300,6 +327,7 @@ def build_status(engine: Engine, now: datetime | None = None) -> dict[str, Any]:
             "watch": _watch(conn, now),
             "research": _research(conn, now),
             "ideas": _ideas(conn),
+            "analyst": _analyst(conn),
             "commits": _commits(),
         }
 
