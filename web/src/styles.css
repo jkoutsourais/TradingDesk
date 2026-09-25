@@ -1,0 +1,431 @@
+/* Primer tokens only; no raw colors. Light and dark follow the OS (data-color-mode="auto"). */
+@import "@primer/primitives/dist/css/base/size/size.css";
+@import "@primer/primitives/dist/css/functional/size/border.css";
+@import "@primer/primitives/dist/css/functional/size/radius.css";
+@import "@primer/primitives/dist/css/functional/size/size.css";
+@import "@primer/primitives/dist/css/functional/typography/typography.css";
+@import "@primer/primitives/dist/css/functional/themes/light.css";
+@import "@primer/primitives/dist/css/functional/themes/dark.css";
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bgColor-default);
+  color: var(--fgColor-default);
+  font-family: var(--fontStack-sansSerif);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+a {
+  color: var(--fgColor-accent);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+.num,
+td.num,
+th.num {
+  font-family: var(--fontStack-monospace);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.mono {
+  font-family: var(--fontStack-monospace);
+}
+
+.muted {
+  color: var(--fgColor-muted);
+}
+
+.pos {
+  color: var(--fgColor-success);
+}
+
+.neg {
+  color: var(--fgColor-danger);
+}
+
+/* Layout: sidebar | main, status bar across the bottom. */
+.app {
+  display: grid;
+  grid-template-columns: 200px 1fr;
+  grid-template-rows: 1fr 24px;
+  height: 100%;
+}
+
+.sidebar {
+  grid-row: 1;
+  border-right: 1px solid var(--borderColor-default);
+  background: var(--bgColor-muted);
+  padding: var(--base-size-8) 0;
+  overflow-y: auto;
+}
+
+.sidebar h6 {
+  margin: var(--base-size-12) var(--base-size-16) var(--base-size-4);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--fgColor-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.sidebar a {
+  display: flex;
+  align-items: center;
+  gap: var(--base-size-8);
+  padding: var(--base-size-4) var(--base-size-16);
+  color: var(--fgColor-default);
+  border-left: 2px solid transparent;
+}
+
+.sidebar a:hover {
+  background: var(--bgColor-default);
+  text-decoration: none;
+}
+
+.sidebar a.active {
+  border-left-color: var(--borderColor-accent-emphasis);
+  background: var(--bgColor-default);
+  font-weight: 600;
+}
+
+.main {
+  grid-row: 1;
+  overflow-y: auto;
+  min-width: 0;
+}
+
+.tabs {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--borderColor-default);
+  background: var(--bgColor-default);
+  padding: 0 var(--base-size-16);
+}
+
+.tabs a {
+  padding: var(--base-size-8) var(--base-size-12);
+  color: var(--fgColor-muted);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+
+.tabs a.active {
+  color: var(--fgColor-default);
+  border-bottom-color: var(--borderColor-accent-emphasis);
+  font-weight: 600;
+}
+
+.tabs a:hover {
+  text-decoration: none;
+  color: var(--fgColor-default);
+}
+
+.content {
+  padding: var(--base-size-16);
+  display: grid;
+  gap: var(--base-size-16);
+  max-width: 1400px;
+}
+
+.grid-2 {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
+  gap: var(--base-size-16);
+}
+
+.statusbar {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: var(--base-size-16);
+  padding: 0 var(--base-size-12);
+  border-top: 1px solid var(--borderColor-default);
+  background: var(--bgColor-muted);
+  color: var(--fgColor-muted);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.statusbar .item {
+  display: flex;
+  align-items: center;
+  gap: var(--base-size-4);
+}
+
+/* Boxes and tables: 1px borders, 6px radius, no shadows. */
+.box {
+  border: 1px solid var(--borderColor-default);
+  border-radius: var(--borderRadius-medium);
+  background: var(--bgColor-default);
+  overflow: hidden;
+}
+
+.box-header {
+  display: flex;
+  align-items: center;
+  gap: var(--base-size-8);
+  padding: var(--base-size-8) var(--base-size-12);
+  background: var(--bgColor-muted);
+  border-bottom: 1px solid var(--borderColor-default);
+  font-weight: 600;
+}
+
+.box-header .spacer {
+  flex: 1;
+}
+
+.box-body {
+  padding: var(--base-size-8) var(--base-size-12);
+}
+
+.scroll {
+  overflow-x: auto;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th,
+td {
+  padding: var(--base-size-4) var(--base-size-12);
+  border-bottom: 1px solid var(--borderColor-muted);
+  text-align: left;
+  vertical-align: top;
+}
+
+th {
+  font-weight: 600;
+  color: var(--fgColor-muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+tr:last-child td {
+  border-bottom: 0;
+}
+
+tbody tr:hover {
+  background: var(--bgColor-muted);
+}
+
+.empty {
+  padding: var(--base-size-12);
+  color: var(--fgColor-muted);
+}
+
+ul.lines {
+  margin: 0;
+  padding: var(--base-size-8) var(--base-size-12) var(--base-size-8) var(--base-size-28);
+}
+
+ul.lines li {
+  margin: var(--base-size-4) 0;
+}
+
+.label {
+  display: inline-block;
+  padding: 0 var(--base-size-6);
+  border: 1px solid var(--borderColor-default);
+  border-radius: var(--borderRadius-full);
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--fgColor-muted);
+  white-space: nowrap;
+}
+
+.label.accent {
+  color: var(--fgColor-accent);
+  border-color: var(--borderColor-accent-muted);
+}
+
+.label.success {
+  color: var(--fgColor-success);
+  border-color: var(--borderColor-success-muted);
+}
+
+.label.danger {
+  color: var(--fgColor-danger);
+  border-color: var(--borderColor-danger-muted);
+}
+
+.label.attention {
+  color: var(--fgColor-attention);
+  border-color: var(--borderColor-attention-muted);
+}
+
+.dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--fgColor-muted);
+  flex: none;
+}
+
+.dot.ok {
+  background: var(--fgColor-success);
+}
+
+.dot.fail {
+  background: var(--fgColor-danger);
+}
+
+.dot.warn {
+  background: var(--fgColor-attention);
+}
+
+.dot.run {
+  background: var(--fgColor-accent);
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+  color: inherit;
+}
+
+.btn {
+  padding: var(--base-size-4) var(--base-size-12);
+  border: 1px solid var(--borderColor-default);
+  border-radius: var(--borderRadius-medium);
+  background: var(--bgColor-muted);
+  cursor: pointer;
+}
+
+.btn:hover {
+  background: var(--bgColor-default);
+}
+
+.btn.primary {
+  color: var(--fgColor-onEmphasis, var(--bgColor-default));
+  background: var(--bgColor-accent-emphasis);
+  border-color: var(--borderColor-accent-emphasis);
+}
+
+.input {
+  width: 100%;
+  padding: var(--base-size-6) var(--base-size-8);
+  border: 1px solid var(--borderColor-default);
+  border-radius: var(--borderRadius-medium);
+  background: var(--bgColor-default);
+}
+
+.input:focus {
+  outline: 2px solid var(--borderColor-accent-emphasis);
+  outline-offset: -1px;
+}
+
+/* Ctrl+K palette */
+.palette-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  background: var(--overlay-backdrop-bgColor, transparent);
+  display: flex;
+  justify-content: center;
+  padding-top: 12vh;
+}
+
+.palette {
+  width: min(560px, 92vw);
+  align-self: flex-start;
+  border: 1px solid var(--borderColor-default);
+  border-radius: var(--borderRadius-medium);
+  background: var(--bgColor-default);
+  overflow: hidden;
+}
+
+.palette ul {
+  list-style: none;
+  margin: 0;
+  padding: var(--base-size-4) 0;
+  max-height: 50vh;
+  overflow-y: auto;
+}
+
+.palette li {
+  padding: var(--base-size-6) var(--base-size-12);
+  display: flex;
+  gap: var(--base-size-8);
+  align-items: center;
+  cursor: pointer;
+}
+
+.palette li.selected {
+  background: var(--bgColor-accent-muted);
+}
+
+.palette .input {
+  border: 0;
+  border-bottom: 1px solid var(--borderColor-default);
+  border-radius: 0;
+  padding: var(--base-size-12);
+}
+
+/* Phone: the sidebar becomes a top strip and tables scroll sideways. */
+@media (max-width: 760px) {
+  .app {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto 1fr 24px;
+  }
+
+  .sidebar {
+    grid-row: 1;
+    display: flex;
+    overflow-x: auto;
+    padding: 0;
+    border-right: 0;
+    border-bottom: 1px solid var(--borderColor-default);
+  }
+
+  .sidebar h6 {
+    display: none;
+  }
+
+  .sidebar a {
+    border-left: 0;
+    border-bottom: 2px solid transparent;
+    white-space: nowrap;
+  }
+
+  .sidebar a.active {
+    border-bottom-color: var(--borderColor-accent-emphasis);
+  }
+
+  .main {
+    grid-row: 2;
+  }
+
+  .grid-2 {
+    grid-template-columns: 1fr;
+  }
+
+  .content {
+    padding: var(--base-size-8);
+  }
+}

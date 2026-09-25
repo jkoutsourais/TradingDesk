@@ -17,6 +17,7 @@ from desk.api.dev import dev_router
 from desk.api.intake import intake_router
 from desk.api.pages import pages_router
 from desk.api.scores import scores_router
+from desk.api.v1 import api_router
 from desk.artifacts.store import ArtifactNotFoundError, get_artifact, get_lineage
 
 logger = logging.getLogger(__name__)
@@ -59,6 +60,7 @@ def create_app(
     app.include_router(pages_router(engine))
     app.include_router(intake_router(engine))
     app.include_router(scores_router(engine))
+    app.include_router(api_router(engine, ollama_base_url))
 
     @app.get("/health")
     def health() -> dict[str, Any]:
