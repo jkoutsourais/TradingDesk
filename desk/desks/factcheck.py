@@ -15,6 +15,7 @@ import unicodedata
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
+from difflib import SequenceMatcher
 from typing import Any, Literal
 from uuid import UUID
 from zoneinfo import ZoneInfo
@@ -84,9 +85,47 @@ def _normalize(value: str) -> str:
     return re.sub(r"\s+", " ", folded).strip()
 
 
+WORD = re.compile(r"[^\W_]+(?:[.,]\d+)*")
+ELLIPSIS = re.compile(r"\[?(?:\.\.\.|…)\]?")
+# Share of words a copied passage must share, in order, with a same-length span of the
+# source. Small local models drop or swap a word when copying a passage.
+QUOTE_MATCH_RATIO = 0.85
+# Shorter passages must match exactly; a few words match too much text loosely.
+MIN_FUZZY_WORDS = 6
+
+
+def _words(value: str) -> list[str]:
+    return WORD.findall(_normalize(value))
+
+
+def _fragment_in(fragment: list[str], source: list[str]) -> bool:
+    size = len(fragment)
+    if f" {' '.join(fragment)} " in f" {' '.join(source)} ":
+        return True
+    if size < MIN_FUZZY_WORDS:
+        return False
+    matcher = SequenceMatcher(autojunk=False)
+    matcher.set_seq2(fragment)
+    for start in range(max(1, len(source) - size + 1)):
+        matcher.set_seq1(source[start : start + size])
+        if matcher.real_quick_ratio() < QUOTE_MATCH_RATIO:
+            continue
+        if matcher.quick_ratio() >= QUOTE_MATCH_RATIO and matcher.ratio() >= QUOTE_MATCH_RATIO:
+            return True
+    return False
+
+
 def quote_in_source(quote: str, source: str) -> bool:
-    normalized = _normalize(quote)
-    return bool(normalized) and normalized in _normalize(source)
+    """The quote, allowing for case, punctuation, "..." gaps and a few changed words.
+
+    Every number in the quote must still appear in the source, so a loose match never
+    carries a figure the source does not contain.
+    """
+    fragments = [words for part in ELLIPSIS.split(quote) if (words := _words(part))]
+    if not fragments or not set(_digits(quote)) <= set(_digits(source)):
+        return False
+    source_words = _words(source)
+    return all(_fragment_in(fragment, source_words) for fragment in fragments)
 
 
 def _digits(value: str) -> list[str]:

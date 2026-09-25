@@ -114,24 +114,52 @@ def pending_items(conn: Connection, tiers: TiersConfig, now: datetime) -> list[I
     return items
 
 
+def _indexes_ok(items: list[Item], reply: TriageReply) -> bool:
+    indexes = [entry.index for entry in reply.labels]
+    return sorted(indexes) == list(range(1, len(items) + 1))
+
+
+def _invented_numbers(item: Item, entry: TriageEntry) -> set[str]:
+    allowed = set(DIGITS.findall(item.text))
+    # "tier 1" names a category from the prompt, not a data value.
+    reason = TIER_REFERENCE.sub("", entry.reason)
+    return set(DIGITS.findall(reason)) - allowed
+
+
 def check_reply(items: list[Item]) -> Any:
     def check(reply: TriageReply) -> list[str]:
         problems = []
-        indexes = [entry.index for entry in reply.labels]
-        expected = set(range(1, len(items) + 1))
-        if set(indexes) != expected or len(indexes) != len(expected):
+        if not _indexes_ok(items, reply):
             problems.append(f"return exactly one entry for each index 1 to {len(items)}")
         for entry in reply.labels:
             if 1 <= entry.index <= len(items):
-                allowed = set(DIGITS.findall(items[entry.index - 1].text))
-                # "tier 1" names a category from the prompt, not a data value.
-                reason = TIER_REFERENCE.sub("", entry.reason)
-                extra = set(DIGITS.findall(reason)) - allowed
+                extra = _invented_numbers(items[entry.index - 1], entry)
                 if extra:
                     problems.append(f"item {entry.index}: reason adds numbers {sorted(extra)}")
         return problems
 
     return check
+
+
+WITHHELD_REASON = "reason withheld: it cited a number not in the item"
+
+
+def salvage_reply(items: list[Item], reply: TriageReply) -> TriageReply | None:
+    """Keep every label and withhold only reasons that cite numbers not in their item.
+
+    The label is the judgment; a stray number in its one-line reason should not cost the
+    whole batch. Returns None when the reply does not label each item exactly once.
+    """
+    if not _indexes_ok(items, reply):
+        return None
+    return TriageReply(
+        labels=[
+            entry.model_copy(update={"reason": WITHHELD_REASON})
+            if _invented_numbers(items[entry.index - 1], entry)
+            else entry
+            for entry in reply.labels
+        ]
+    )
 
 
 @dataclass
@@ -166,13 +194,16 @@ async def run_triage(
     listing = "\n".join(f"[{i}] {item.text}" for i, item in enumerate(items, start=1))
     prompt = load_prompt("triage", {"holdings": holdings, "watchlist": watchlist, "items": listing})
     result = await chat.structured(model, prompt, TriageReply, check=check_reply(items))
-    if result.value is None:
+    reply = result.value
+    if reply is None and result.rejected is not None:
+        reply = salvage_reply(items, result.rejected)
+    if reply is None:
         outcome.failed, outcome.error = True, result.error
         return outcome
 
     to_push: list[Item] = []
     with engine.begin() as conn:
-        for entry in result.value.labels:
+        for entry in reply.labels:
             item = items[entry.index - 1]
             append_artifact(
                 conn,

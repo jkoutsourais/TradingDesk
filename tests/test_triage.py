@@ -1,6 +1,6 @@
 from uuid import uuid4
 
-from desk.watch.triage import Item, TriageEntry, TriageReply, check_reply
+from desk.watch.triage import Item, TriageEntry, TriageReply, check_reply, salvage_reply
 
 
 def items() -> list[Item]:
@@ -35,3 +35,15 @@ def test_invented_numbers_are_rejected() -> None:
 def test_missing_or_extra_indexes_are_rejected() -> None:
     problems = check_reply(items())(reply((1, "ok"), (3, "ok")))
     assert any("exactly one entry" in p for p in problems)
+
+
+def test_salvage_withholds_reasons_with_invented_numbers() -> None:
+    salvaged = salvage_reply(items(), reply((1, "Watchlist name moving 3.1 ATR"), (2, "Up 12%")))
+    assert salvaged is not None
+    assert salvaged.labels[0].reason == "Watchlist name moving 3.1 ATR"
+    assert salvaged.labels[1].label == "relevant"
+    assert "withheld" in salvaged.labels[1].reason
+
+
+def test_salvage_needs_every_index() -> None:
+    assert salvage_reply(items(), reply((1, "ok"), (3, "ok"))) is None

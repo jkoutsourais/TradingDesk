@@ -46,6 +46,9 @@ class StructuredResult[T: BaseModel]:
     attempts: int
     error: str | None = None
     problems: list[str] = field(default_factory=list)
+    # The last reply that parsed but failed the checks, for callers that can keep its
+    # valid parts.
+    rejected: T | None = None
 
     @property
     def ok(self) -> bool:
@@ -77,6 +80,7 @@ class OllamaChat:
         ]
         usage = Usage(model=model.model)
         problems: list[str] = []
+        rejected: T | None = None
         for attempt in range(1, MAX_ATTEMPTS + 1):
             body: dict[str, Any] = {
                 "model": model.model,
@@ -100,13 +104,19 @@ class OllamaChat:
                 problems = check(value) if check else []
                 if not problems:
                     return StructuredResult(value, usage, attempt)
+                rejected = value
             if attempt < MAX_ATTEMPTS:
                 messages += [
                     {"role": "assistant", "content": content},
                     {"role": "user", "content": _retry_instruction(problems)},
                 ]
         return StructuredResult(
-            None, usage, MAX_ATTEMPTS, error="; ".join(problems)[:1000], problems=problems
+            None,
+            usage,
+            MAX_ATTEMPTS,
+            error="; ".join(problems)[:1000],
+            problems=problems,
+            rejected=rejected,
         )
 
     async def unload(self, model: str) -> None:

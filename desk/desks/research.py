@@ -39,6 +39,7 @@ MAX_FILING_CHARS = 6000
 SIMILAR_SOURCES = 5
 DIGITS = re.compile(r"\d+(?:[.,]\d+)*")
 CLAIM_REF = re.compile(r"\[c(\d+)\]")
+SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
 
 
 # --- Subject selection ---------------------------------------------------------------------
@@ -171,45 +172,95 @@ class ResearchDraft(BaseModel):
     claims: list[DraftClaim] = Field(max_length=12)
 
 
+def claim_problems(ref: int, claim: DraftClaim, sources: list[Source]) -> list[str]:
+    if not 1 <= claim.source_index <= len(sources):
+        return [f"claim c{ref}: source_index {claim.source_index} does not exist"]
+    problems = []
+    if not quote_in_source(claim.quote, sources[claim.source_index - 1].text):
+        problems.append(f"claim c{ref}: quote is not in source [{claim.source_index}]")
+    for number in claim.numbers:
+        if number.kind == "reported" and not number_in_quote(
+            ClaimNumber(name=number.name, text=number.text, kind="reported"), claim.quote
+        ):
+            problems.append(f"claim c{ref}: number {number.text!r} is not in its quote")
+        if number.kind == "market_move" and not (number.symbol and number.as_of):
+            problems.append(f"claim c{ref}: market_move needs symbol and as_of")
+    stated = set(DIGITS.findall(claim.statement))
+    listed = {d for n in claim.numbers for d in DIGITS.findall(n.text)}
+    if stated - listed:
+        missing = sorted(stated - listed)
+        problems.append(f"claim c{ref}: statement numbers {missing} are not in numbers")
+    return problems
+
+
+def untraced_numbers(text: str, traced: set[str]) -> list[str]:
+    """Numbers in section prose that no claim quote in the dossier contains."""
+    return sorted(set(DIGITS.findall(CLAIM_REF.sub(" ", text))) - traced)
+
+
 def check_draft(sources: list[Source]) -> Any:
     def check(draft: ResearchDraft) -> list[str]:
-        problems: list[str] = []
-        quote_digits: dict[int, set[str]] = {}
-        for i, claim in enumerate(draft.claims, start=1):
-            if not 1 <= claim.source_index <= len(sources):
-                problems.append(f"claim c{i}: source_index {claim.source_index} does not exist")
-                continue
-            source = sources[claim.source_index - 1]
-            if not quote_in_source(claim.quote, source.text):
-                problems.append(
-                    f"claim c{i}: quote is not word for word in source [{claim.source_index}]"
-                )
-            quote_digits[i] = set(DIGITS.findall(claim.quote))
-            for number in claim.numbers:
-                if number.kind == "reported" and not number_in_quote(
-                    ClaimNumber(name=number.name, text=number.text, kind="reported"), claim.quote
-                ):
-                    problems.append(f"claim c{i}: number {number.text!r} is not in its quote")
-                if number.kind == "market_move" and not (number.symbol and number.as_of):
-                    problems.append(f"claim c{i}: market_move needs symbol and as_of")
-            stated = set(DIGITS.findall(claim.statement))
-            listed = {d for n in claim.numbers for d in DIGITS.findall(n.text)}
-            if stated - listed:
-                missing = sorted(stated - listed)
-                problems.append(f"claim c{i}: statement numbers {missing} are not in numbers")
+        problems = [
+            problem
+            for ref, claim in enumerate(draft.claims, start=1)
+            for problem in claim_problems(ref, claim, sources)
+        ]
+        traced = {d for claim in draft.claims for d in DIGITS.findall(claim.quote)}
         for section in draft.sections:
-            cited = {int(n) for n in CLAIM_REF.findall(section.text)}
-            allowed = set().union(*(quote_digits.get(c, set()) for c in cited)) if cited else set()
-            prose = CLAIM_REF.sub(" ", section.text)
-            extra = set(DIGITS.findall(prose)) - allowed
-            if extra:
+            if extra := untraced_numbers(section.text, traced):
                 problems.append(
-                    f"section {section.title!r}: numbers {sorted(extra)} are not in the quotes "
-                    "of the claims it cites"
+                    f"section {section.title!r}: numbers {extra} are not in any claim's quote"
                 )
         return problems
 
     return check
+
+
+@dataclass
+class Salvage:
+    claims: list[DraftClaim]
+    sections: list[DraftSection]
+    dropped: list[str]
+
+
+def salvage_draft(draft: ResearchDraft, sources: list[Source]) -> Salvage:
+    """Keep the claims that pass and the section sentences whose numbers they trace.
+
+    Used when the model still fails the checks after its retry: one bad quote should not
+    cost the claims that are sound. Claim references are renumbered to the kept claims.
+    """
+    renumber: dict[int, int] = {}
+    claims, dropped = [], []
+    for ref, claim in enumerate(draft.claims, start=1):
+        if problems := claim_problems(ref, claim, sources):
+            dropped += problems
+            continue
+        claims.append(claim)
+        renumber[ref] = len(claims)
+    traced = {d for claim in claims for d in DIGITS.findall(claim.quote)}
+
+    def ref_text(match: re.Match[str]) -> str:
+        new = renumber.get(int(match.group(1)))
+        return f"[c{new}]" if new else ""
+
+    sections = []
+    for section in draft.sections:
+        kept = []
+        for sentence in SENTENCE_END.split(section.text):
+            if extra := untraced_numbers(sentence, traced):
+                dropped.append(f"section {section.title!r}: dropped a sentence with {extra}")
+                continue
+            refs = {int(n) for n in CLAIM_REF.findall(sentence)}
+            if refs and not refs & renumber.keys():
+                dropped.append(
+                    f"section {section.title!r}: dropped a sentence citing dropped claims"
+                )
+                continue
+            if sentence.strip():
+                kept.append(re.sub(r"\s+(?=[.!?]?$)", "", CLAIM_REF.sub(ref_text, sentence)))
+        if kept:
+            sections.append(DraftSection(title=section.title, text=" ".join(kept)))
+    return Salvage(claims, sections, dropped)
 
 
 def _as_claim_number(number: DraftNumber) -> ClaimNumber:
@@ -257,7 +308,19 @@ async def research_subject(
         # One subject's failed request is recorded and the shift moves on to the next.
         logger.warning("research request for %s failed: %s", subject.symbol, request_failure(exc))
         result = StructuredResult(None, Usage(model=model.model), 0, error=request_failure(exc))
-    if result.value is None:
+    draft = result.value
+    if draft is None and result.rejected is not None:
+        salvaged = salvage_draft(result.rejected, sources)
+        if salvaged.claims:
+            logger.info(
+                "research for %s kept %d of %d claims after the checks: %s",
+                subject.symbol,
+                len(salvaged.claims),
+                len(result.rejected.claims),
+                "; ".join(salvaged.dropped),
+            )
+            draft = ResearchDraft(sections=salvaged.sections, claims=salvaged.claims)
+    if draft is None:
         error = result.error or "research reply failed"
         failed = Dossier(
             status=ArtifactStatus.FAILED,
@@ -279,7 +342,6 @@ async def research_subject(
         with engine.begin() as conn:
             append_artifact(conn, failed)
         return None, [], result.usage, f"{subject.symbol}: {error}"
-    draft = result.value
     claims = []
     id_by_ref: dict[int, UUID] = {}
     for i, draft_claim in enumerate(draft.claims, start=1):

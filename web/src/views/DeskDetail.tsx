@@ -87,7 +87,7 @@ function WatchView({ data }: { data: WatchDetail }) {
 function failureSummary(error: string | null): string {
   if (!error) return "failed";
   const problems = error.split("; ").filter(Boolean);
-  const quotes = problems.filter((p) => p.includes("word for word")).length;
+  const quotes = problems.filter((p) => p.includes("word for word") || p.includes("quote is not in source")).length;
   const numbers = problems.filter((p) => p.includes("numbers") || p.includes("number")).length;
   const parts = [];
   if (quotes) parts.push(`${quotes} quote${quotes > 1 ? "s" : ""} not found in the source`);

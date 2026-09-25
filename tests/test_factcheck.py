@@ -38,6 +38,27 @@ def test_quote_found_verbatim_and_with_normalized_spacing_and_quotes() -> None:
     assert quote_in_source("RAISED ITS FIVE-YEAR CAPITAL PLAN", SOURCE)
 
 
+def test_quote_with_small_wording_differences_matches() -> None:
+    # Models drop a word or punctuation when copying; the passage is still the source's.
+    assert quote_in_source(
+        "American Electric Power raised its five-year capital plan to $54 billion citing "
+        "unprecedented data-center load growth",
+        SOURCE,
+    )
+    assert quote_in_source("raised its five-year capital plan ... data-center load growth", SOURCE)
+
+
+def test_near_quote_with_a_changed_number_is_rejected() -> None:
+    assert not quote_in_source(
+        "American Electric Power on Tuesday raised its five-year capital plan to $56 billion",
+        SOURCE,
+    )
+
+
+def test_short_quotes_must_match_exactly() -> None:
+    assert not quote_in_source("raised its capital plan", SOURCE)
+
+
 def test_fabricated_quote_rejected() -> None:
     assert not quote_in_source("raised its capital plan to $60 billion", SOURCE)
     assert not quote_in_source("", SOURCE)
