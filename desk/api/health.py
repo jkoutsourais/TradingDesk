@@ -1,4 +1,4 @@
-"""Operational detail for the dashboard: collector health, volumes, watch activity and
+"""Operational detail for the dashboard: collector health, watch activity and
 research dossiers, read from stored rows."""
 
 from datetime import datetime, timedelta
@@ -39,53 +39,6 @@ def collector_rows(conn: Any, schedule: ScheduleConfig, now: datetime) -> list[d
     return rows
 
 
-def _scalar(conn: Any, sql: str, **params: Any) -> Any:
-    return conn.execute(text(sql), params).scalar_one()
-
-
-def volumes(conn: Any, since: datetime) -> dict[str, Any]:
-    by_source = conn.execute(
-        text(
-            "SELECT payload->>'source' AS source, count(*) AS n FROM artifacts "
-            "WHERE kind = 'raw_record' AND created_at >= :since GROUP BY 1 ORDER BY 2 DESC"
-        ),
-        {"since": since},
-    ).mappings()
-    return {
-        "raw_records_24h": [dict(r) for r in by_source],
-        "raw_records_total": _scalar(
-            conn, "SELECT count(*) FROM artifacts WHERE kind = 'raw_record'"
-        ),
-        "embeddings_total": _scalar(conn, "SELECT count(*) FROM raw_record_embeddings"),
-        "daily_bars_total": _scalar(conn, "SELECT count(*) FROM price_bars WHERE interval = '1d'"),
-        "daily_bar_symbols": _scalar(
-            conn, "SELECT count(DISTINCT symbol) FROM price_bars WHERE interval = '1d'"
-        ),
-        "minute_bars_24h": _scalar(
-            conn,
-            "SELECT count(*) FROM price_bars WHERE interval = '1m' AND ts >= :since",
-            since=since,
-        ),
-        "series_observations_24h": _scalar(
-            conn, "SELECT count(*) FROM series_observations WHERE fetched_at >= :since", since=since
-        ),
-        "grid_observations_24h": _scalar(
-            conn, "SELECT count(*) FROM grid_observations WHERE fetched_at >= :since", since=since
-        ),
-    }
-
-
-def recent_failures(conn: Any, since: datetime) -> list[dict[str, Any]]:
-    rows = conn.execute(
-        text(
-            "SELECT job, finished_at, left(error, 300) AS error FROM job_runs "
-            "WHERE status = 'failed' AND finished_at >= :since ORDER BY finished_at DESC LIMIT 15"
-        ),
-        {"since": since},
-    ).mappings()
-    return [dict(r) for r in rows]
-
-
 def watch_activity(conn: Any, now: datetime) -> dict[str, Any]:
     triggers = conn.execute(
         text(
@@ -93,7 +46,7 @@ def watch_activity(conn: Any, now: datetime) -> dict[str, Any]:
             "payload->>'tier' AS tier, (payload->>'importance')::float AS importance, "
             "(payload->>'urgent')::boolean AS urgent, payload->>'summary' AS summary "
             "FROM artifacts WHERE kind = 'trigger' AND created_at >= :since "
-            "ORDER BY created_at DESC LIMIT 40"
+            "ORDER BY urgent DESC, importance DESC, created_at DESC LIMIT 40"
         ),
         {"since": now - timedelta(hours=24)},
     ).mappings()
@@ -105,10 +58,6 @@ def watch_activity(conn: Any, now: datetime) -> dict[str, Any]:
             " ORDER BY scheduled_for LIMIT 5) ORDER BY scheduled_for"
         ),
         {"now": now},
-    ).mappings()
-    queue = conn.execute(
-        text("SELECT status, count(*) AS n FROM jobs WHERE created_at >= :since GROUP BY status"),
-        {"since": now - timedelta(hours=1)},
     ).mappings()
     promotions = conn.execute(
         text(
@@ -124,7 +73,6 @@ def watch_activity(conn: Any, now: datetime) -> dict[str, Any]:
     return {
         "triggers": [dict(r) for r in triggers],
         "shifts": [dict(r) for r in shifts],
-        "queue_last_hour": {r["status"]: r["n"] for r in queue},
         "promotions": [dict(r) for r in promotions],
         "calendar": [dict(r) for r in events],
     }

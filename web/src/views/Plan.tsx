@@ -44,6 +44,17 @@ interface PlanDetail {
   } | null;
 }
 
+const CHECKS: Record<string, string> = {
+  instrument_allowed: "Allowed in this account",
+  max_loss: "Loss per trade",
+  portfolio_open_risk: "Total open risk",
+  bucket_cap: "Correlated group limit",
+  liquidity: "Liquidity",
+  stop_consistent: "Stop and target",
+  events: "Upcoming events",
+  settled_cash: "Settled cash",
+};
+
 export function PlanView({ id }: { id: string }) {
   const { data, error } = useApi<PlanDetail>(`/api/plans/${id}`, ["risk_decision"]);
   if (error && !data) return <div className="content"><div className="empty">{error}</div></div>;
@@ -51,9 +62,9 @@ export function PlanView({ id }: { id: string }) {
   const { plan, decision } = data;
   const rows: [string, string][] = [
     ["Account", plan.account_ref],
-    ["Entry", `${plan.subject} ${plan.entry}  (${plan.entry_ref})`],
-    ["Stop", plan.stop ? `${plan.stop}  (${plan.stop_ref})` : "-"],
-    ["Target", plan.target ? `${plan.target}  (${plan.target_ref})` : "-"],
+    ["Entry", `${plan.subject} ${plan.entry}`],
+    ["Stop", plan.stop ?? "-"],
+    ["Target", plan.target ?? "-"],
     ["Expiry", plan.expiry ?? "-"],
     ["Cost per unit", money(Number(plan.unit_cost))],
     ["Loss per unit at the stop", money(Number(plan.unit_max_loss))],
@@ -63,7 +74,7 @@ export function PlanView({ id }: { id: string }) {
     <div className="content">
       <div className="box">
         <div className="box-header">
-          <b>{plan.subject}</b> {plan.structure.replace("_", " ")} <span className="mono muted">{plan.instrument}</span>
+          <b>{plan.subject}</b> {plan.structure.replace(/_/g, " ")} <span className="mono muted">{plan.instrument}</span>
           {decision && <span className={`label ${decision.decision === "vetoed" ? "danger" : "success"}`}>{decision.decision}</span>}
           <span className="spacer" />
           <ExplainButton id={plan.id} />
@@ -87,15 +98,15 @@ export function PlanView({ id }: { id: string }) {
         </div>
       </div>
       <div className="box">
-        <div className="box-header">Legs</div>
+        <div className="box-header">Orders to place</div>
         <div className="scroll">
           <table>
-            <thead><tr><th>Action</th><th>Kind</th><th>Symbol</th><th className="num">Price</th><th>Source</th></tr></thead>
+            <thead><tr><th>Action</th><th>Kind</th><th>Symbol</th><th className="num">Price</th></tr></thead>
             <tbody>
               {plan.legs.map((leg, i) => (
                 <tr key={i}>
                   <td>{leg.action}</td><td>{leg.kind}</td><td className="mono">{leg.symbol}</td>
-                  <td className="num">{num(Number(leg.price))}</td><td className="muted mono">{leg.price_ref}</td>
+                  <td className="num">{num(Number(leg.price))}</td>
                 </tr>
               ))}
             </tbody>
@@ -115,11 +126,11 @@ export function PlanView({ id }: { id: string }) {
           {decision.veto_reasons.map((r) => <div key={r} className="box-body neg">Veto: {r}</div>)}
           <div className="scroll">
             <table>
-              <thead><tr><th>Check</th><th>Result</th><th>Detail</th></tr></thead>
+              <thead><tr><th>Check</th><th>Result</th><th>Why</th></tr></thead>
               <tbody>
                 {decision.checks.map((c) => (
                   <tr key={c.name}>
-                    <td className="mono">{c.name}</td>
+                    <td>{CHECKS[c.name] ?? c.name.replace(/_/g, " ")}</td>
                     <td><span className={`dot ${c.result === "pass" ? "ok" : c.result === "fail" ? "fail" : "warn"}`} /> {c.result}</td>
                     <td>{c.detail}</td>
                   </tr>

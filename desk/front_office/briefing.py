@@ -7,6 +7,7 @@ code-built sections, so the morning page and push never go missing.
 """
 
 import logging
+import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, time, timedelta
 from decimal import Decimal
@@ -494,10 +495,10 @@ def rating_lines(conn: Connection, covers_from: datetime) -> tuple[list[str], li
         if rating.previous_rating and rating.previous_rating != rating.rating:
             line += f", changed from {RATING_LABELS[rating.previous_rating]}"
         if rating.status is ArtifactStatus.FAILED:
-            line += ". Rating run failed; previous rating stands"
+            line += ". Rating run failed; previous rating stands."
         else:
-            line += f". {rating.reasons[0].text}"
-        line += f" Action: {rating.suggested_action}"
+            line += f". {sentence(rating.reasons[0].text)}"
+        line += f" Action: {sentence(rating.suggested_action)}"
         if rating.risk_flags:
             line += " Flags: " + "; ".join(f.detail for f in rating.risk_flags) + "."
         lines.append(line)
@@ -560,18 +561,44 @@ def _check(table: FactTable) -> Any:
     return check
 
 
+# Two watch-hit placeholders in a row render as run-on text; each is its own sentence.
+_ADJACENT_TRIGGER = re.compile(r"(\{trig_\d+\})(?=\s*\{trig_)")
+
+
+def sentence(text: str) -> str:
+    """Capitalised, with closing punctuation, so notes join cleanly after the numbers."""
+    text = _ADJACENT_TRIGGER.sub(r"\1.", text.strip())
+    if not text:
+        return ""
+    text = text[0].upper() + text[1:]
+    return text if text[-1] in ".!?" else f"{text}."
+
+
+def holding_notes(lines: list[str]) -> dict[str, str]:
+    """The model's line per holding, keyed by its leading ticker, ticker removed."""
+    notes = {}
+    for line in lines:
+        ticker, _, rest = line.strip().partition(" ")
+        notes[ticker.rstrip(":,-").upper()] = rest.lstrip(":,- ")
+    return notes
+
+
+def holding_line(table: FactTable, symbol: str, note: str = "") -> str:
+    """Code-written numbers for one holding, then the model's note on what happened."""
+    ids = {fact.id for fact in table}
+    key = fact_key(symbol)
+    parts = []
+    if {f"{key}.price", f"{key}.change"} <= ids:
+        parts.append(f"{{{key}.price}}, {{{key}.change}} since the prior close")
+    if {f"{key}.value", f"{key}.pnl", f"{key}.pnl_pct"} <= ids:
+        parts.append(f"position {{{key}.value}}, unrealized {{{key}.pnl}} ({{{key}.pnl_pct}})")
+    line = f"{symbol}: " + "; ".join(parts) + "." if parts else f"{symbol}."
+    return " ".join(filter(None, (table.render(line), table.render(sentence(note)))))
+
+
 def _fallback_sections(table: FactTable, inputs: BriefingInputs) -> list[BriefSection]:
     """Code-only brief used when the model fails: the same facts, without prose."""
-    ids = {fact.id for fact in table}
-    holdings = []
-    for symbol in inputs.holdings_order:
-        parts = [f"{symbol}"]
-        if f"{fact_key(symbol)}.change" in ids:
-            parts.append(f"{{{fact_key(symbol)}.change}} since the prior close")
-        if f"{fact_key(symbol)}.pnl" in ids:
-            key = fact_key(symbol)
-            parts.append(f"unrealized {{{key}.pnl}} ({{{key}.pnl_pct}})")
-        holdings.append(table.render(", ".join(parts)))
+    holdings = [holding_line(table, symbol) for symbol in inputs.holdings_order]
     watch = [table.render(f"{{trig_{i}}}") for i in range(1, len(inputs.trigger_ids) + 1)][:8]
     return [
         BriefSection(title="Your holdings", lines=tuple(holdings)),
@@ -637,13 +664,18 @@ async def build_briefing(
     )
     if result.value is not None:
         draft = result.value
+        notes = holding_notes(draft.holdings)
         sections = [
             BriefSection(title="Summary", lines=(table.render(draft.headline),)),
             BriefSection(
                 title="Market and regime", lines=tuple(table.render(line) for line in draft.market)
             ),
             BriefSection(
-                title="Your holdings", lines=tuple(table.render(line) for line in draft.holdings)
+                title="Your holdings",
+                lines=tuple(
+                    holding_line(table, symbol, notes.get(symbol.upper(), ""))
+                    for symbol in inputs.holdings_order
+                ),
             ),
             BriefSection(
                 title="Watch hits", lines=tuple(table.render(line) for line in draft.watch)

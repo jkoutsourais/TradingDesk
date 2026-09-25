@@ -1,45 +1,27 @@
-import { useState } from "react";
-
-import type { Desks as DesksData, DeskRow } from "../api";
-import { ago, count, duration, num, time } from "../format";
+import type { CollectorRow, Desks as DesksData, DeskRow } from "../api";
+import { ago, jobTitle, plainError, SOURCES, time } from "../format";
 import { useApi } from "../hooks";
 import { DeskDetail } from "./DeskDetail";
 
-function DeskJobs({ desk }: { desk: DeskRow }) {
-  if (!desk.jobs.length) {
-    return <div className="empty">No scheduler or collector jobs recorded for this desk in 24 hours.</div>;
-  }
+const SOURCE_STATES: Record<string, [string, string]> = {
+  ok: ["ok", "Working"],
+  idle: ["ok", "Outside its hours"],
+  stale: ["warn", "Behind schedule"],
+  failing: ["fail", "Failing"],
+  disabled: ["", "Off"],
+};
+
+function Problems({ desk }: { desk: DeskRow }) {
+  if (!desk.failures.length) return <div className="empty">No failed runs in the last 24 hours.</div>;
   return (
     <div className="scroll">
       <table>
-        <thead>
-          <tr>
-            <th>Job</th>
-            <th>Status</th>
-            <th>Started</th>
-            <th className="num">Runtime</th>
-            <th>Model</th>
-            <th className="num">Tokens out</th>
-            <th className="num">tok/s</th>
-            <th className="num">Load</th>
-            <th>Error</th>
-          </tr>
-        </thead>
         <tbody>
-          {desk.jobs.map((job, i) => (
-            <tr key={`${job.job}-${job.started_at}-${i}`}>
-              <td className="mono">{job.job}</td>
-              <td>
-                <span className={`dot ${job.status === "ok" ? "ok" : job.status === "failed" ? "fail" : "run"}`} />{" "}
-                {job.status}
-              </td>
-              <td>{time(job.started_at)}</td>
-              <td className="num">{duration(job.runtime_ms)}</td>
-              <td className="mono">{job.model ?? "-"}</td>
-              <td className="num">{job.tokens_out ? count(job.tokens_out) : "-"}</td>
-              <td className="num">{job.tokens_per_s ? num(job.tokens_per_s, 1) : "-"}</td>
-              <td className="num">{job.load_ms ? duration(job.load_ms) : "-"}</td>
-              <td className="muted">{job.error ?? ""}</td>
+          {desk.failures.map((f, i) => (
+            <tr key={`${f.job}-${f.finished_at}-${i}`}>
+              <td>{jobTitle(f.job)}</td>
+              <td className="muted" style={{ whiteSpace: "nowrap" }}>{time(f.finished_at)}</td>
+              <td>{plainError(f.error)}</td>
             </tr>
           ))}
         </tbody>
@@ -48,12 +30,48 @@ function DeskJobs({ desk }: { desk: DeskRow }) {
   );
 }
 
+function Sources({ collectors }: { collectors: CollectorRow[] }) {
+  const order = ["failing", "stale", "ok", "idle", "disabled"];
+  const sorted = [...collectors].sort((a, b) => order.indexOf(a.state) - order.indexOf(b.state));
+  return (
+    <div className="box">
+      <div className="box-header">Sources</div>
+      <div className="scroll">
+        <table>
+          <thead>
+            <tr><th>Source</th><th>Status</th><th>Last update</th><th>Problem</th></tr>
+          </thead>
+          <tbody>
+            {sorted.map((c) => {
+              const [dot, label] = SOURCE_STATES[c.state] ?? ["", c.state];
+              const troubled = c.state === "failing" || c.state === "stale";
+              return (
+                <tr key={c.collector}>
+                  <td>{SOURCES[c.collector] ?? c.collector}</td>
+                  <td><span className={`dot ${dot}`} /> {label}</td>
+                  <td>{c.enabled ? ago(c.last_success_at) : c.disabled_reason}</td>
+                  <td className="muted">{troubled ? plainError(c.last_error) : ""}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function sourceSummary(collectors: CollectorRow[]): string {
+  const enabled = collectors.filter((c) => c.state !== "disabled");
+  const healthy = enabled.filter((c) => c.state === "ok" || c.state === "idle").length;
+  return `${healthy} of ${enabled.length} sources healthy`;
+}
+
 export function Desks({ selected }: { selected?: string }) {
   const { data, error } = useApi<DesksData>("/api/desks", [], 20_000);
-  const [showCollectors, setShowCollectors] = useState(selected === "data");
   if (error && !data) return <div className="content"><div className="empty">{error}</div></div>;
   if (!data) return <div className="content"><div className="empty">Loading</div></div>;
-  const desks = selected ? data.desks.filter((d) => d.id === selected) : data.desks;
+  const desk = data.desks.find((d) => d.id === selected);
   return (
     <div className="content">
       <div className="box">
@@ -61,88 +79,41 @@ export function Desks({ selected }: { selected?: string }) {
         <div className="scroll">
           <table>
             <thead>
-              <tr>
-                <th>Desk</th>
-                <th className="num">Artifacts</th>
-                <th className="num">Failed</th>
-                <th className="num">Tokens in</th>
-                <th className="num">Tokens out</th>
-                <th className="num">tok/s</th>
-                <th>Models</th>
-                <th>Last output</th>
-              </tr>
+              <tr><th>Desk</th><th>Produced</th><th>Health</th><th>Last activity</th></tr>
             </thead>
             <tbody>
-              {data.desks.map((d) => (
-                <tr key={d.id}>
-                  <td>
-                    <a href={`#/desks/${d.id}`}>{d.title}</a>
-                  </td>
-                  <td className="num">{count(d.artifacts)}</td>
-                  <td className={`num ${d.failed ? "neg" : ""}`}>{count(d.failed)}</td>
-                  <td className="num">{count(d.tokens_in)}</td>
-                  <td className="num">{count(d.tokens_out)}</td>
-                  <td className="num">{d.tokens_per_s ? num(d.tokens_per_s, 1) : "-"}</td>
-                  <td className="mono">{d.models.join(", ") || "-"}</td>
-                  <td>{ago(d.last_at)}</td>
-                </tr>
-              ))}
+              {data.desks.map((d) => {
+                const summary = d.id === "data" ? [sourceSummary(data.collectors)] : d.summary;
+                return (
+                  <tr key={d.id} className={d.id === selected ? "selected" : ""}>
+                    <td>
+                      <a href={`#/desks/${d.id}`}><b>{d.title}</b></a>
+                      <div className="muted">{d.about}</div>
+                    </td>
+                    <td>{summary.length ? summary.join(", ") : <span className="muted">Nothing yet</span>}</td>
+                    <td>
+                      {d.problems ? (
+                        <><span className="dot fail" /> {d.problems} problem{d.problems > 1 ? "s" : ""}</>
+                      ) : (
+                        <><span className="dot ok" /> OK</>
+                      )}
+                    </td>
+                    <td>{d.last_at ? ago(d.last_at) : <span className="muted">-</span>}</td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
       </div>
       {selected && <DeskDetail desk={selected} />}
-      {desks.map((desk) =>
-        selected ? (
-          <div className="box" key={desk.id}>
-            <div className="box-header">
-              {desk.title} jobs
-              {desk.job_failures > 0 && <span className="label danger">{desk.job_failures} failed</span>}
-            </div>
-            <DeskJobs desk={desk} />
-          </div>
-        ) : null,
-      )}
-      <div className="box">
-        <div className="box-header">
-          Collectors
-          <span className="spacer" />
-          <button className="btn" onClick={() => setShowCollectors((v) => !v)}>
-            {showCollectors ? "Hide" : "Show"}
-          </button>
+      {selected === "data" && <Sources collectors={data.collectors} />}
+      {desk && (desk.failures.length > 0 || selected !== "data") && (
+        <div className="box">
+          <div className="box-header">{desk.title} desk: failed runs</div>
+          <Problems desk={desk} />
         </div>
-        {showCollectors && (
-          <div className="scroll">
-            <table>
-              <thead>
-                <tr>
-                  <th>Collector</th>
-                  <th>State</th>
-                  <th>Last success</th>
-                  <th className="num">Fails</th>
-                  <th className="num">Last run added</th>
-                  <th>Last error</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.collectors.map((c) => (
-                  <tr key={c.collector}>
-                    <td className="mono">{c.collector}</td>
-                    <td>
-                      <span className={`dot ${c.state === "ok" ? "ok" : c.state === "failing" ? "fail" : c.state === "stale" ? "warn" : ""}`} />{" "}
-                      {c.state}
-                    </td>
-                    <td>{c.enabled ? ago(c.last_success_at) : c.disabled_reason}</td>
-                    <td className="num">{count(c.consecutive_failures)}</td>
-                    <td className="num">{count(c.records_added_last)}</td>
-                    <td className="muted">{c.last_error ?? ""}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+      )}
     </div>
   );
 }

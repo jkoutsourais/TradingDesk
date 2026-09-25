@@ -90,34 +90,14 @@ export interface Today {
   ratings: RatingRow[];
 }
 
-export interface JobRow {
-  desk: string;
-  job: string;
-  status: string;
-  started_at: string;
-  finished_at: string | null;
-  model: string | null;
-  tokens_in: number | null;
-  tokens_out: number | null;
-  tokens_per_s: number | null;
-  load_ms: number | null;
-  generation_ms: number | null;
-  error: string | null;
-  runtime_ms: number | null;
-}
-
 export interface DeskRow {
   id: string;
   title: string;
-  artifacts: number;
-  failed: number;
-  tokens_in: number;
-  tokens_out: number;
-  tokens_per_s: number | null;
-  models: string[];
+  about: string;
+  summary: string[];
+  problems: number;
   last_at: string | null;
-  jobs: JobRow[];
-  job_failures: number;
+  failures: { job: string; finished_at: string; error: string | null }[];
 }
 
 export interface CollectorRow {

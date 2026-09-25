@@ -2,7 +2,7 @@ import { GraphIcon, HistoryIcon, LawIcon, ShieldCheckIcon } from "@primer/octico
 
 import { ExplainButton } from "../components/Explain";
 import { type Point, Points } from "../components/Points";
-import { num, time } from "../format";
+import { firstHit, num, origin, scoredTitle, time } from "../format";
 import { useApi } from "../hooks";
 
 interface ThesisListRow {
@@ -97,9 +97,9 @@ export function ThesisList() {
               <thead>
                 <tr>
                   <th>Thesis</th>
-                  <th>Origin</th>
+                  <th>Source</th>
                   <th>State</th>
-                  <th className="num">Conv.</th>
+                  <th className="num">Conviction</th>
                   <th className="num">1d</th>
                   <th className="num">5d</th>
                   <th className="num">20d</th>
@@ -115,9 +115,9 @@ export function ThesisList() {
                       </a>
                       <div className="muted">{t.statement}</div>
                     </td>
-                    <td>{t.origin}</td>
+                    <td>{origin(t.origin)}</td>
                     <td>{stateLabel(t.state)}</td>
-                    <td className="num">{t.conviction ?? "-"}</td>
+                    <td className="num">{t.conviction ? `${t.conviction}/5` : "-"}</td>
                     <td className="num"><Ret value={t.returns["1d"]} /></td>
                     <td className="num"><Ret value={t.returns["5d"]} /></td>
                     <td className="num"><Ret value={t.returns["20d"]} /></td>
@@ -154,13 +154,13 @@ export function ThesisView({ id }: { id: string }) {
         <div className="scroll">
           <table>
             <tbody>
-              <tr><td className="muted">Origin</td><td>{t.origin}</td><td className="muted">Conviction</td><td className="num" style={{ textAlign: "left" }}>{t.conviction ? `${t.conviction}/5` : "-"}</td></tr>
+              <tr><td className="muted">Source</td><td>{origin(t.origin)}</td><td className="muted">Conviction</td><td className="num" style={{ textAlign: "left" }}>{t.conviction ? `${t.conviction}/5` : "-"}</td></tr>
               <tr><td className="muted">Horizon</td><td>{t.horizon ?? "-"}</td><td className="muted">Review by</td><td className="mono">{t.review_by ?? "-"}</td></tr>
               {inv && (
                 <tr>
-                  <td className="muted">Hard line</td>
+                  <td className="muted">Invalidated if</td>
                   <td className="mono">{inv.hard.instrument} daily close {inv.hard.operator} {inv.hard.level}</td>
-                  <td className="muted">Warning</td>
+                  <td className="muted">Warning if</td>
                   <td className="mono">{inv.warning.instrument} {inv.warning.operator} {inv.warning.level}</td>
                 </tr>
               )}
@@ -185,10 +185,10 @@ export function ThesisView({ id }: { id: string }) {
           <ul className="lines">
             {data.evidence.map((e) => (
               <li key={e.id}>
-                <span className={`label ${e.verdict === "corrected" ? "attention" : "success"}`}>{e.verdict}</span> {e.statement}
+                {e.statement}{" "}
+                {e.verdict === "corrected" && <span className="label attention">corrected</span>}
                 <div className="muted" style={{ fontSize: 12 }}>
                   "{e.quote}" · {e.url ? <a href={e.url} target="_blank" rel="noreferrer">{e.source}</a> : e.source}
-                  {e.entailment !== null && ` · support ${num(e.entailment, 1)}`}
                 </div>
               </li>
             ))}
@@ -248,22 +248,22 @@ export function ThesisView({ id }: { id: string }) {
           <ul className="lines">
             {data.versions.map((v) => (
               <li key={v.id}>
-                <a href={`#/trace/${v.id}`} className="mono">{time(v.created_at)}</a> {stateLabel(v.state)} <span className="muted">{v.change_note ?? v.produced_by}</span>
+                <a href={`#/trace/${v.id}`} className="mono">{time(v.created_at)}</a> {stateLabel(v.state)} <span className="muted">{v.change_note ?? "first version"}</span>
               </li>
             ))}
           </ul>
           {data.scores.length > 0 && (
             <div className="scroll">
               <table>
-                <thead><tr><th>Scored</th><th>Horizon</th><th className="num">Return</th><th className="num">R</th><th>First hit</th></tr></thead>
+                <thead><tr><th>Call</th><th>After</th><th className="num">Return</th><th className="num">R</th><th>Reached</th></tr></thead>
                 <tbody>
                   {data.scores.map((s) => (
                     <tr key={`${s.subject_id}-${s.horizon}`}>
-                      <td>{s.kind}</td>
+                      <td>{scoredTitle(s.kind)}</td>
                       <td>{s.horizon}</td>
                       <td className="num"><Ret value={s.return_pct} /></td>
                       <td className="num">{num(s.r_multiple)}</td>
-                      <td>{s.first_hit ?? "-"}</td>
+                      <td>{firstHit(s.first_hit)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -272,7 +272,6 @@ export function ThesisView({ id }: { id: string }) {
           )}
         </div>
       </div>
-      <div className="muted">Model {t.model ?? "-"}, prompt {t.prompt_version ?? "-"}</div>
     </div>
   );
 }

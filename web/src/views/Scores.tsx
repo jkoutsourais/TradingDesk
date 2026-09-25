@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 
 import { baseTextStyle, Chart, token } from "../components/Chart";
-import { count, num, time } from "../format";
+import { count, firstHit, LANES, num, origin, scoredTitle, time } from "../format";
 import { useApi, useHashRoute } from "../hooks";
 
 interface Group {
@@ -34,6 +34,12 @@ const TITLES: Record<string, string> = {
   structure: "Structure",
 };
 
+/** A score attribution value in plain words, e.g. lane power_grid as "Power + grid". */
+function attribution(dimension: string, value: string): string {
+  if (dimension === "lane" || dimension === "origin") return origin(value);
+  return value.replace(/_/g, " ");
+}
+
 function hitChart(groups: Group[]) {
   const withHits = groups.filter((g) => g.hit_rate !== null);
   return {
@@ -41,7 +47,7 @@ function hitChart(groups: Group[]) {
     grid: { left: 110, right: 24, top: 8, bottom: 24 },
     tooltip: { trigger: "axis" },
     xAxis: { type: "value", max: 100, axisLabel: { formatter: "{value}%", color: token("--fgColor-muted") }, splitLine: { lineStyle: { color: token("--borderColor-muted") } } },
-    yAxis: { type: "category", data: withHits.map((g) => g.value), axisLabel: { color: token("--fgColor-default") } },
+    yAxis: { type: "category", data: withHits.map((g) => LANES[g.value] ?? g.value.replace(/_/g, " ")), axisLabel: { color: token("--fgColor-default") } },
     series: [{ type: "bar", data: withHits.map((g) => Math.round((g.hit_rate ?? 0) * 100)), itemStyle: { color: token("--fgColor-accent") }, barMaxWidth: 14 }],
   };
 }
@@ -84,7 +90,7 @@ export function Scores() {
                   <tbody>
                     {groups.map((g) => (
                       <tr key={g.value}>
-                        <td>{g.value}</td>
+                        <td>{attribution(dimension, g.value)}</td>
                         <td className="num">{count(g.count)}</td>
                         <td className="num">{g.hit_rate === null ? "-" : `${num(g.hit_rate * 100, 0)}%`}</td>
                         <td className={`num ${(g.avg_return ?? 0) >= 0 ? "pos" : "neg"}`}>{g.avg_return === null ? "-" : `${num(g.avg_return)}%`}</td>
@@ -102,16 +108,16 @@ export function Scores() {
           <div className="box-header">Latest scores</div>
           <div className="scroll">
             <table>
-              <thead><tr><th>Subject</th><th>Attribution</th><th className="num">Return</th><th className="num">R</th><th>Hit</th><th>First hit</th><th>Scored</th></tr></thead>
+              <thead><tr><th>Call</th><th>From</th><th className="num">Return</th><th className="num">R</th><th>Hit</th><th>Reached</th><th>Scored</th></tr></thead>
               <tbody>
                 {data.recent.map((s) => (
                   <tr key={`${s.subject_id}-${s.created_at}`}>
-                    <td><a href={`#/trace/${s.subject_id}`}>{s.kind}</a></td>
-                    <td className="muted">{Object.entries(s.attribution).map(([k, v]) => `${k} ${v}`).join(" · ")}</td>
+                    <td><a href={`#/trace/${s.subject_id}`}>{scoredTitle(s.kind)}</a></td>
+                    <td className="muted">{Object.entries(s.attribution).map(([k, v]) => attribution(k, v)).join(" · ")}</td>
                     <td className={`num ${s.return_pct >= 0 ? "pos" : "neg"}`}>{num(s.return_pct)}%</td>
                     <td className="num">{num(s.r_multiple)}</td>
                     <td>{s.hit === null ? "-" : s.hit ? <span className="pos">yes</span> : <span className="neg">no</span>}</td>
-                    <td>{s.first_hit ?? "-"}</td>
+                    <td>{firstHit(s.first_hit)}</td>
                     <td>{time(s.created_at)}</td>
                   </tr>
                 ))}

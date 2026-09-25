@@ -1,7 +1,7 @@
 import { CpuIcon, PulseIcon, ServerIcon, ClockIcon } from "@primer/octicons-react";
 
 import type { Status } from "../api";
-import { ago, time } from "../format";
+import { ago, jobTitle, shiftTitle, time } from "../format";
 import { useApi } from "../hooks";
 
 export function StatusBar() {
@@ -15,10 +15,10 @@ export function StatusBar() {
         <PulseIcon size={12} />
         {shift.running ? (
           <>
-            <span className="dot run" /> {shift.running.kind} running
+            <span className="dot run" /> {shiftTitle(shift.running.kind)} running
           </>
         ) : shift.next ? (
-          <>next {shift.next.kind} {time(shift.next.scheduled_for)}</>
+          <>next: {shiftTitle(shift.next.kind)} {time(shift.next.scheduled_for)}</>
         ) : (
           "no shift scheduled"
         )}
@@ -29,12 +29,12 @@ export function StatusBar() {
       </span>
       <span className="item">
         <ClockIcon size={12} />
-        {last_job ? `${last_job.job} ${ago(last_job.finished_at)}` : "no runs yet"}
+        {last_job ? `last run: ${jobTitle(last_job.job)} ${ago(last_job.finished_at)}` : "no runs yet"}
       </span>
       <span className="item">
         <ServerIcon size={12} />
         <span className={`dot ${collectors.failing ? "fail" : collectors.stale ? "warn" : "ok"}`} />
-        collectors {collectors.ok} ok
+        sources {collectors.ok} ok
         {collectors.failing ? `, ${collectors.failing} failing` : ""}
         {collectors.stale ? `, ${collectors.stale} stale` : ""}
       </span>

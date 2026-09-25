@@ -1,7 +1,7 @@
 import { AlertIcon, FileIcon, LightBulbIcon, ShieldCheckIcon, ShieldXIcon } from "@primer/octicons-react";
 
 import type { Brief, PlanRow, RatingRow, ThesisRow, Today as TodayData } from "../api";
-import { money, num, RATING, time } from "../format";
+import { money, num, origin, RATING, time } from "../format";
 import { useApi } from "../hooks";
 
 const KINDS = ["brief", "thesis", "debate_verdict", "trade_plan", "risk_decision", "holding_rating"];
@@ -20,10 +20,10 @@ function ThesisTable({ theses }: { theses: ThesisRow[] }) {
         <thead>
           <tr>
             <th>Thesis</th>
-            <th>Origin</th>
+            <th>Source</th>
             <th>Verdict</th>
-            <th className="num">Conv.</th>
-            <th className="num">Hard</th>
+            <th className="num">Conviction</th>
+            <th className="num">Invalidation</th>
             <th className="num">Warning</th>
             <th>Review by</th>
           </tr>
@@ -42,9 +42,9 @@ function ThesisTable({ theses }: { theses: ThesisRow[] }) {
                 )}
                 <div className="muted">{t.statement}</div>
               </td>
-              <td>{t.origin}</td>
+              <td>{origin(t.origin)}</td>
               <td>{verdictLabel(t.verdict)}</td>
-              <td className="num">{t.conviction ?? "-"}</td>
+              <td className="num">{t.conviction ? `${t.conviction}/5` : "-"}</td>
               <td className="num">{num(t.hard)}</td>
               <td className="num">{num(t.warning)}</td>
               <td className="mono">{t.review_by ?? "-"}</td>
@@ -76,7 +76,7 @@ function PlanTable({ plans, vetoed }: { plans: PlanRow[]; vetoed: boolean }) {
             <tr key={p.id}>
               <td>
                 <a href={`#/plans/${p.id}`}>
-                  <b>{p.subject}</b> {p.structure.replace("_", " ")}
+                  <b>{p.subject}</b> {p.structure.replace(/_/g, " ")}
                 </a>
                 <div className="muted mono">{p.instrument}</div>
                 {p.risk_note && <div className="muted">{p.risk_note}</div>}
@@ -127,16 +127,26 @@ function RatingTable({ ratings }: { ratings: RatingRow[] }) {
                 <b>{r.subject}</b>
               </td>
               <td>
-                {r.status === "failed" ? <span className="dot fail" /> : null} {RATING[r.rating] ?? r.rating}
-                {r.previous && r.previous !== r.rating && (
+                {r.status === "failed" ? (
+                  <><span className="dot fail" /> Not rated{r.previous && <div className="muted">last {RATING[r.previous] ?? r.previous}</div>}</>
+                ) : (
+                  RATING[r.rating] ?? r.rating
+                )}
+                {r.status !== "failed" && r.previous && r.previous !== r.rating && (
                   <div className="muted">was {RATING[r.previous] ?? r.previous}</div>
                 )}
                 {r.judged && <div className="muted">judge: {RATING[r.judged] ?? r.judged}</div>}
               </td>
-              <td>{r.confidence}</td>
+              <td>{r.status === "failed" ? "" : r.confidence}</td>
               <td>
-                {r.status === "failed" ? <span className="muted">{r.error}</span> : r.reason}
-                <div className="muted">{r.action}</div>
+                {r.status === "failed" ? (
+                  <span className="muted">The model's answer failed the source checks, so no new rating was issued. Review manually.</span>
+                ) : (
+                  <>
+                    {r.reason}
+                    <div className="muted">{r.action}</div>
+                  </>
+                )}
                 {r.flags?.map((f) => (
                   <div key={f.code}>
                     <span className="label attention">{f.detail}</span>

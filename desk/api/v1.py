@@ -2,8 +2,8 @@
 
 GET /api/status          shift state, loaded models, last runs, collector health
 GET /api/today           latest briefing, open theses, plans, vetoes, ratings
-GET /api/desks           per-desk artifacts, failures, tokens and recent jobs
-GET /api/desks/{id}      desk-specific activity (data, watch, research)
+GET /api/desks           per-desk activity summary, problems and source health
+GET /api/desks/{id}      desk-specific activity (watch, research)
 GET /api/briefs/{id}     one briefing
 GET /api/lineage/{id}    an artifact and its ancestors, for the Trace view
 GET /api/events          server-sent events: one per new artifact
@@ -23,9 +23,7 @@ from sqlalchemy import Connection, Engine, text
 
 from desk.api.health import (
     collector_rows,
-    recent_failures,
     research_dossiers,
-    volumes,
     watch_activity,
 )
 from desk.artifacts.brief import Brief
@@ -35,18 +33,37 @@ from desk.desks.analyst.debate import chain_ids, latest_verdicts
 from desk.desks.idea.status import open_theses, warning_flags
 
 DESKS = (
-    ("data", "Data"),
-    ("watch", "Watch"),
-    ("research", "Research"),
-    ("factcheck", "Fact-check"),
-    ("idea", "Idea"),
-    ("holdings", "Holdings"),
-    ("analyst", "Analyst"),
-    ("trader", "Trader"),
-    ("risk", "Risk"),
-    ("front_office", "Front office"),
-    ("scoring", "Scoring"),
+    ("data", "Data", "Pulls news, filings, prices and broker statements"),
+    ("watch", "Watch", "Scans for moves and news worth a look; runs the shifts"),
+    ("research", "Research", "Writes sourced dossiers on flagged subjects"),
+    ("factcheck", "Fact-check", "Checks each research claim against its source"),
+    ("idea", "Idea", "Ranks candidates by lane and drafts theses"),
+    ("holdings", "Holdings", "Rates each current holding every morning"),
+    ("analyst", "Analyst", "Debates theses from several analyst views"),
+    ("trader", "Trader", "Turns approved ideas into sized trade plans"),
+    ("risk", "Risk", "Checks every plan against the risk limits"),
+    ("front_office", "Front office", "Writes the briefing and answers chat"),
+    ("scoring", "Scoring", "Scores past calls against what prices did"),
 )
+# Singular and plural names for the outputs counted on the Desks view. Kinds not listed
+# (raw records, labels, snapshots) are plumbing and stay off the summary.
+OUTPUT_NOUNS = {
+    "trigger": ("alert", "alerts"),
+    "dossier": ("dossier", "dossiers"),
+    "verified_claim": ("claim checked", "claims checked"),
+    "idea_selection": ("idea ranking", "idea rankings"),
+    "thesis": ("thesis", "theses"),
+    "holding_rating": ("holding rated", "holdings rated"),
+    "analyst_view": ("analyst view", "analyst views"),
+    "debate_verdict": ("debate", "debates"),
+    "trade_plan": ("plan", "plans"),
+    "risk_decision": ("risk decision", "risk decisions"),
+    "brief": ("briefing", "briefings"),
+    "chat_reply": ("chat reply", "chat replies"),
+    "score": ("score", "scores"),
+    "fill": ("fill", "fills"),
+    "position": ("position", "positions"),
+}
 EVENT_POLL_S = 3.0
 OLLAMA_TIMEOUT_S = 2.0
 
@@ -183,50 +200,52 @@ def ratings(conn: Connection) -> list[dict[str, Any]]:
 
 def _desks(conn: Connection, now: datetime) -> list[dict[str, Any]]:
     since = now - timedelta(hours=24)
-    stats = {
-        row["prefix"]: row
-        for row in _rows(
-            conn,
-            "SELECT split_part(produced_by, '.', 1) AS prefix, count(*) AS artifacts, "
-            "count(*) FILTER (WHERE status = 'failed') AS failed, "
-            "sum(tokens_in) AS tokens_in, sum(tokens_out) AS tokens_out, "
-            "sum(runtime_ms) FILTER (WHERE model IS NOT NULL) AS model_ms, "
-            "max(created_at) AS last_at, array_agg(DISTINCT model) FILTER "
-            "(WHERE model IS NOT NULL) AS models FROM artifacts WHERE created_at >= :since "
-            "GROUP BY 1",
-            since=since,
-        )
-    }
-    jobs = _rows(
+    counts: dict[str, list[dict[str, Any]]] = {}
+    for row in _rows(
         conn,
-        "SELECT desk, job, status, started_at, finished_at, model, tokens_in, tokens_out, "
-        "tokens_per_s, load_ms, generation_ms, error, "
-        "extract(epoch FROM finished_at - started_at) * 1000 AS runtime_ms FROM job_runs "
-        "WHERE started_at >= :since ORDER BY started_at DESC LIMIT 400",
+        "SELECT split_part(produced_by, '.', 1) AS prefix, kind, count(*) AS n, "
+        "count(*) FILTER (WHERE status = 'failed') AS failed, max(created_at) AS last_at "
+        "FROM artifacts WHERE created_at >= :since GROUP BY 1, 2",
+        since=since,
+    ):
+        counts.setdefault(row["prefix"], []).append(row)
+    failures = _rows(
+        conn,
+        "SELECT desk, job, finished_at, left(error, 300) AS error FROM job_runs "
+        "WHERE status = 'failed' AND started_at >= :since ORDER BY started_at DESC LIMIT 200",
         since=since,
     )
     desks = []
-    for prefix, title in DESKS:
-        row = stats.get(prefix, {})
-        desk_jobs = [j for j in jobs if (j["desk"] or "").startswith(prefix)]
-        tokens_out = row.get("tokens_out") or 0
-        model_ms = row.get("model_ms") or 0
+    for prefix, title, about in DESKS:
+        rows = counts.get(prefix, [])
+        desk_failures = [f for f in failures if (f["desk"] or "").startswith(prefix)]
+        failed_outputs = sum(row["failed"] for row in rows)
         desks.append(
             {
                 "id": prefix,
                 "title": title,
-                "artifacts": row.get("artifacts", 0),
-                "failed": row.get("failed", 0),
-                "tokens_in": row.get("tokens_in") or 0,
-                "tokens_out": tokens_out,
-                "tokens_per_s": round(tokens_out / (model_ms / 1000), 1) if model_ms else None,
-                "models": row.get("models") or [],
-                "last_at": row.get("last_at"),
-                "jobs": desk_jobs[:40],
-                "job_failures": sum(1 for j in desk_jobs if j["status"] == "failed"),
+                "about": about,
+                "summary": _activity(rows),
+                "problems": failed_outputs + len(desk_failures),
+                "last_at": max((row["last_at"] for row in rows), default=None),
+                "failures": desk_failures[:20],
             }
         )
     return desks
+
+
+def _activity(rows: list[dict[str, Any]]) -> list[str]:
+    """Plain-language counts of what a desk produced, e.g. "3 theses (1 failed)"."""
+    phrases = []
+    for row in sorted(rows, key=lambda r: -r["n"]):
+        nouns = OUTPUT_NOUNS.get(row["kind"])
+        if nouns is None:
+            continue
+        phrase = f"{row['n']} {nouns[0] if row['n'] == 1 else nouns[1]}"
+        if row["failed"]:
+            phrase += f" ({row['failed']} failed)"
+        phrases.append(phrase)
+    return phrases
 
 
 async def _events(engine: Engine, request: Request) -> AsyncIterator[str]:
@@ -311,16 +330,9 @@ def api_router(engine: Engine, ollama_base_url: str) -> APIRouter:
 
     @router.get("/desks/{desk_id}")
     def desk_detail(desk_id: str) -> dict[str, Any]:
-        """Desk-specific activity: data volumes, watch hits and shifts, research dossiers."""
+        """Desk-specific activity: watch hits and shifts, research dossiers."""
         now = datetime.now(UTC)
         with engine.connect() as conn:
-            if desk_id == "data":
-                return _jsonable(
-                    {
-                        "volumes": volumes(conn, now - timedelta(hours=24)),
-                        "failures": recent_failures(conn, now - timedelta(hours=6)),
-                    }
-                )
             if desk_id == "watch":
                 return _jsonable(watch_activity(conn, now))
             if desk_id == "research":

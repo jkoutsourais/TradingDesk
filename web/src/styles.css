@@ -435,3 +435,7 @@ select {
     padding: var(--base-size-8);
   }
 }
+
+tr.selected td {
+  background: var(--bgColor-accent-muted);
+}

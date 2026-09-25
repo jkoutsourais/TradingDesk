@@ -50,3 +50,106 @@ export const RATING: Record<string, string> = {
   trim: "Trim",
   sell: "Sell",
 };
+
+export const LANES: Record<string, string> = {
+  catalyst: "Catalyst",
+  screen: "Screen",
+  commodity: "Commodity",
+  power_grid: "Power + grid",
+  policy: "Policy",
+  macro: "Macro",
+  event_additions: "Event additions",
+};
+
+/** Thesis origin: a lane id, or "jon" for ideas entered through intake. */
+export function origin(value: string): string {
+  if (value === "jon") return "Jon";
+  return LANES[value] ?? value.replace(/_/g, " ");
+}
+
+const SHIFTS: Record<string, string> = {
+  pre_market: "Pre-market shift",
+  post_market: "Post-market shift",
+  briefing: "Morning briefing",
+};
+
+export function shiftTitle(kind: string): string {
+  return SHIFTS[kind] ?? kind.replace(/_/g, " ");
+}
+
+const JOBS: Record<string, string> = {
+  "scan:news": "News scan",
+  "scan:intraday": "Intraday price scan",
+  "scan:commodity": "Commodity scan",
+  "scan:close": "Closing scan",
+  "triage:run": "News triage",
+  "chat:run": "Chat reply",
+  "intake:run": "Thesis intake",
+};
+
+/** "shift:pre_market" and collector ids read as plain names. */
+export function jobTitle(job: string): string {
+  if (JOBS[job]) return JOBS[job];
+  if (job.startsWith("shift:")) return shiftTitle(job.slice(6));
+  return SOURCES[job] ?? job.replace(/[:_]/g, " ");
+}
+
+export const SOURCES: Record<string, string> = {
+  cftc_cot: "CFTC futures positioning",
+  edgar_company_filings: "SEC filings for followed companies",
+  edgar_filing_text: "SEC filing text",
+  edgar_latest_filings: "SEC latest filings",
+  eia: "EIA energy data",
+  federal_register_documents: "Federal Register",
+  federal_register_public_inspection: "Federal Register, pre-publication",
+  fed_press_releases: "Fed press releases",
+  fed_speeches: "Fed speeches",
+  finnhub_company_news: "Company news",
+  finnhub_earnings_calendar: "Earnings calendar",
+  finnhub_general_news: "Market news",
+  fred: "FRED economic data",
+  gridstatus: "Power grid data",
+  ibkr_flex: "IBKR statements",
+  news_embeddings: "News search index",
+  raw_record_purge: "News buffer cleanup",
+  release_calendar: "Economic release calendar",
+  tastytrade_metrics: "tastytrade market metrics",
+  tastytrade_positions: "tastytrade positions",
+  tastytrade_stream: "Live quotes",
+  truth_social: "Truth Social posts",
+  yahoo_daily_bars: "Daily prices",
+};
+
+/** A short reading of a collector or job error for the dashboard. */
+export function plainError(error: string | null | undefined): string {
+  if (!error) return "";
+  if (/HTTP 429/.test(error)) return "Rate limited by the provider; retrying on the next run.";
+  if (/ReadTimeout|ConnectTimeout|timed out/i.test(error)) return "The provider did not respond in time.";
+  if (/HTTP 404/.test(error)) return "The feed address returned not found.";
+  if (/HTTP 5\d\d/.test(error)) return "The provider had a server error.";
+  if (/HTTP 40[13]/.test(error)) return "Access was refused; check the API key.";
+  if (/cancelled at shutdown/.test(error)) return "Stopped by a service restart.";
+  const text = error.replace(/^[A-Za-z]+Error: /, "");
+  return text.length > 140 ? `${text.slice(0, 140)}...` : text;
+}
+
+const SCORED: Record<string, string> = {
+  thesis: "Thesis",
+  debate_verdict: "Debate call",
+  trade_plan: "Plan",
+  risk_decision: "Risk decision",
+  holding_rating: "Holding rating",
+  analyst_view: "Analyst view",
+  position: "Position",
+};
+
+export function scoredTitle(kind: string): string {
+  return SCORED[kind] ?? kind.replace(/_/g, " ");
+}
+
+/** Which level the price reached first on a scored call. */
+export function firstHit(value: string | null): string {
+  if (value === "stop") return "stop first";
+  if (value === "target") return "target first";
+  return value === "none" ? "neither" : "-";
+}

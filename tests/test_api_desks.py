@@ -56,7 +56,8 @@ def test_desks_and_book_endpoints(db_engine: Engine) -> None:
     assert states["fred"] == "disabled"
     refs = {h["account_ref"] for h in client.get("/api/book").json()["holdings"]}
     assert "ibkr:0000" in refs
-    assert "raw_records_total" in client.get("/api/desks/data").json()["volumes"]
+    data_desk = next(d for d in desks["desks"] if d["id"] == "data")
+    assert {"about", "summary", "problems", "failures"} <= set(data_desk)
     watch = client.get("/api/desks/watch").json()
     assert {"triggers", "shifts", "calendar"} <= set(watch)
     assert client.get("/api/desks/risk").json() == {}

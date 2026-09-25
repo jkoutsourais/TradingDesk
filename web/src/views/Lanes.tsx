@@ -3,7 +3,7 @@ import "@xyflow/react/dist/style.css";
 import { useMemo, useState } from "react";
 
 import { baseTextStyle, Chart, token } from "../components/Chart";
-import { count, duration, num, time } from "../format";
+import { count, duration, LANES as TITLES, num, time } from "../format";
 import { useApi } from "../hooks";
 
 interface Card {
@@ -43,15 +43,6 @@ interface LanesData {
   lanes: LaneData[];
 }
 
-const TITLES: Record<string, string> = {
-  catalyst: "Catalyst",
-  screen: "Screen",
-  commodity: "Commodity",
-  power_grid: "Power + grid",
-  policy: "Policy",
-  macro: "Macro",
-  event_additions: "Event additions",
-};
 const STAGE_TITLES: Record<string, string> = {
   candidate: "Candidates",
   promoted: "Promoted",
@@ -223,7 +214,7 @@ function funnelOption(lane: LaneData) {
   };
 }
 
-type SortKey = "lane" | "candidates" | "scored" | "hit_rate" | "avg_return" | "avg_r" | "model_calls" | "tokens" | "runtime_ms";
+type SortKey = "lane" | "candidates" | "scored" | "hit_rate" | "avg_return" | "avg_r" | "runtime_ms";
 
 export function Lanes() {
   const [selection, setSelection] = useState<string | null>(null);
@@ -258,7 +249,7 @@ export function Lanes() {
     <div className="content">
       <div className="box">
         <div className="box-header">
-          Shift
+          Ranking from
           <input
             type="range"
             min={0}
@@ -305,19 +296,17 @@ export function Lanes() {
           {shown && Object.keys(shown.funnel.stages).length ? <Chart option={funnelOption(shown)} height={320} /> : <div className="empty">No candidates in 30 days.</div>}
         </div>
         <div className="box">
-          <div className="box-header">Lane metrics, 30 days (5-day scores)</div>
+          <div className="box-header">Lane results, last 30 days (scored 5 days after each call)</div>
           <div className="scroll">
             <table>
               <thead>
                 <tr>
                   {header("lane", "Lane", false)}
-                  {header("candidates", "Now")}
+                  {header("candidates", "Candidates")}
                   {header("scored", "Scored")}
                   {header("hit_rate", "Hit")}
-                  {header("avg_return", "Avg ret")}
+                  {header("avg_return", "Avg return")}
                   {header("avg_r", "Avg R")}
-                  {header("model_calls", "Calls")}
-                  {header("tokens", "Tokens")}
                   {header("runtime_ms", "Model time")}
                 </tr>
               </thead>
@@ -334,8 +323,6 @@ export function Lanes() {
                       {lane.metrics.avg_return === undefined ? "-" : `${num(lane.metrics.avg_return)}%`}
                     </td>
                     <td className="num">{num(lane.metrics.avg_r)}</td>
-                    <td className="num">{count(lane.metrics.model_calls)}</td>
-                    <td className="num">{count(lane.metrics.tokens)}</td>
                     <td className="num">{duration(lane.metrics.runtime_ms)}</td>
                   </tr>
                 ))}
