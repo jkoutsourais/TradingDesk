@@ -129,6 +129,9 @@ export function plainError(error: string | null | undefined): string {
   if (/HTTP 5\d\d/.test(error)) return "The provider had a server error.";
   if (/HTTP 40[13]/.test(error)) return "Access was refused; check the API key.";
   if (/cancelled at shutdown/.test(error)) return "Stopped by a service restart.";
+  if (/reason adds numbers/.test(error)) return "A news label contained a number not in the item; the batch is retried on the next run.";
+  if (/unknown fact/.test(error)) return "The model cited a fact that does not exist, so that answer was not used.";
+  if (/NotSupported|NoDataFound/.test(error)) return "The grid operator had no data for that request.";
   const text = error.replace(/^[A-Za-z]+Error: /, "");
   return text.length > 140 ? `${text.slice(0, 140)}...` : text;
 }
