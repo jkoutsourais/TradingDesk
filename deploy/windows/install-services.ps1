@@ -11,8 +11,10 @@
 
     desk-tunnel keeps an SSH reverse tunnel open from the Beelink's loopback port
     $TunnelRemotePort to the API on 127.0.0.1:$ApiPort, so the dashboard reaches the API
-    without opening any inbound port here. It uses the installing user's SSH key, config
-    and known_hosts by explicit path, since LocalSystem has no SSH profile of its own.
+    without opening any inbound port here. Windows OpenSSH only accepts a private key owned
+    by the account using it, so the installer copies the installing user's key and
+    known_hosts to C:\ProgramData\desk\ssh, owned by SYSTEM and readable only by SYSTEM
+    and Administrators.
 
     Services start at boot, restart 5 seconds after a crash, and write rotated logs to
     logs\<service>.log in the repo (git-ignored). Docker Desktop and Ollama only start
@@ -118,13 +120,24 @@ foreach ($Name in $Services.Keys) {
 $Ssh = (Get-Command ssh -ErrorAction SilentlyContinue).Source
 if (-not $Ssh) { throw 'ssh not found on PATH. Install the Windows OpenSSH client.' }
 $SshDir = Join-Path $env:USERPROFILE '.ssh'
-$Key = Join-Path $SshDir 'id_ed25519'
-if (-not (Test-Path $Key)) { throw "No SSH key at $Key; set up key login to $TunnelTarget first." }
+$UserKey = Join-Path $SshDir 'id_ed25519'
+if (-not (Test-Path $UserKey)) { throw "No SSH key at $UserKey; set up key login to $TunnelTarget first." }
+$ServiceSshDir = Join-Path $env:ProgramData 'desk\ssh'
+New-Item -ItemType Directory -Force -Path $ServiceSshDir | Out-Null
+$Key = Join-Path $ServiceSshDir 'id_ed25519'
+$KnownHosts = Join-Path $ServiceSshDir 'known_hosts'
+Copy-Item $UserKey $Key -Force
+Copy-Item (Join-Path $SshDir 'known_hosts') $KnownHosts -Force
+foreach ($Path in @($ServiceSshDir, $Key, $KnownHosts)) {
+    & icacls $Path /inheritance:r /grant:r 'SYSTEM:(F)' 'Administrators:(F)' | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "icacls on $Path failed" }
+    & icacls $Path /setowner 'SYSTEM' | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "setting the owner of $Path failed" }
+}
 $TunnelArgs = @(
     '-N',
-    '-F', "`"$(Join-Path $SshDir 'config')`"",
     '-i', "`"$Key`"",
-    '-o', "UserKnownHostsFile=`"$(Join-Path $SshDir 'known_hosts')`"",
+    '-o', "UserKnownHostsFile=`"$KnownHosts`"",
     '-o', 'BatchMode=yes',
     '-o', 'ServerAliveInterval=30',
     '-o', 'ServerAliveCountMax=3',
@@ -158,17 +171,18 @@ Invoke-Nssm set $Name AppRotateOnline 0
 Invoke-Nssm set $Name AppRotateBytes 1048576
 Grant-ServiceControl -Name $Name -Sid $ControllerSid
 
-# The logon task that ran a second API and the tunnel during development is replaced by
-# desk-tunnel; it would hold the same remote port.
-$DevTask = Get-ScheduledTask -TaskName 'desk-dev-dashboard' -ErrorAction SilentlyContinue
-if ($DevTask) {
-    Stop-ScheduledTask -TaskName 'desk-dev-dashboard' -ErrorAction SilentlyContinue
-    Get-CimInstance Win32_Process -Filter "Name = 'ssh.exe'" |
-        Where-Object { $_.CommandLine -like "*${TunnelRemotePort}:127.0.0.1*" } |
-        ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
-    Unregister-ScheduledTask -TaskName 'desk-dev-dashboard' -Confirm:$false
-    Write-Host 'Removed the desk-dev-dashboard logon task'
+# Logon tasks that held the tunnel before this service (the development dashboard and the
+# interim user-level tunnel) would hold the same remote port.
+foreach ($TaskName in @('desk-dev-dashboard', 'desk-tunnel-user')) {
+    if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
+        Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+        Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
+        Write-Host "Removed the $TaskName logon task"
+    }
 }
+Get-CimInstance Win32_Process -Filter "Name = 'ssh.exe'" |
+    Where-Object { $_.CommandLine -like "*${TunnelRemotePort}:127.0.0.1*" } |
+    ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
 
 if (-not $NoStart) {
     Invoke-Nssm start $Name
