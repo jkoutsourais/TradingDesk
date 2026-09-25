@@ -3,7 +3,7 @@
 GET /api/status          shift state, loaded models, last runs, collector health
 GET /api/today           latest briefing, open theses, plans, vetoes, ratings
 GET /api/desks           per-desk activity summary, problems and source health
-GET /api/desks/{id}      desk-specific activity (watch, research)
+GET /api/desks/{id}      one desk's recent output (alerts, dossiers, verdicts, plans ...)
 GET /api/briefs/{id}     one briefing
 GET /api/lineage/{id}    an artifact and its ancestors, for the Trace view
 GET /api/events          server-sent events: one per new artifact
@@ -164,6 +164,55 @@ def _theses(conn: Connection, tz: Any) -> list[dict[str, Any]]:
             }
         )
     return result
+
+
+def checked_claims(conn: Connection, since: datetime) -> list[dict[str, Any]]:
+    """Fact-check verdicts with the claim they judged, newest first."""
+    return _rows(
+        conn,
+        "SELECT v.id, v.created_at, v.status, v.payload->>'verdict' AS verdict, "
+        "v.payload->>'reason' AS reason, c.payload->>'subject' AS subject, "
+        "c.payload->>'statement' AS statement FROM artifacts v "
+        "JOIN artifacts c ON c.id = (v.payload->>'claim_id')::uuid "
+        "WHERE v.kind = 'verified_claim' AND v.created_at >= :since "
+        "ORDER BY v.created_at DESC LIMIT 60",
+        since=since,
+    )
+
+
+def debates(conn: Connection, since: datetime) -> list[dict[str, Any]]:
+    return _rows(
+        conn,
+        "SELECT id, created_at, status, error, payload->>'subject' AS subject, "
+        "payload->>'thesis_id' AS thesis_id, payload->>'verdict' AS verdict, "
+        "payload->>'confidence_label' AS confidence, payload->'reasons'->0->>'text' AS reason "
+        "FROM artifacts WHERE kind = 'debate_verdict' AND created_at >= :since "
+        "ORDER BY created_at DESC LIMIT 40",
+        since=since,
+    )
+
+
+def briefs(conn: Connection, since: datetime) -> list[dict[str, Any]]:
+    return _rows(
+        conn,
+        "SELECT id, created_at, status, payload->>'brief_kind' AS kind, "
+        "payload->'sections'->0->'lines'->>0 AS headline FROM artifacts "
+        "WHERE kind = 'brief' AND created_at >= :since ORDER BY created_at DESC LIMIT 20",
+        since=since,
+    )
+
+
+def recent_scores(conn: Connection, since: datetime) -> list[dict[str, Any]]:
+    return _rows(
+        conn,
+        "SELECT id, created_at, payload->>'subject_kind' AS subject_kind, "
+        "payload->>'subject_id' AS subject_id, payload->>'horizon' AS horizon, "
+        "(payload->>'return_pct')::float AS return_pct, "
+        "(payload->>'r_multiple')::float AS r_multiple, (payload->>'hit')::boolean AS hit "
+        "FROM artifacts WHERE kind = 'score' AND created_at >= :since "
+        "ORDER BY created_at DESC LIMIT 40",
+        since=since,
+    )
 
 
 def plans(conn: Connection, since: datetime | None = None, limit: int = 50) -> list[dict[str, Any]]:
@@ -330,13 +379,28 @@ def api_router(engine: Engine, ollama_base_url: str) -> APIRouter:
 
     @router.get("/desks/{desk_id}")
     def desk_detail(desk_id: str) -> dict[str, Any]:
-        """Desk-specific activity: watch hits and shifts, research dossiers."""
+        """What one desk produced recently, shaped for its page on the dashboard."""
         now = datetime.now(UTC)
         with engine.connect() as conn:
             if desk_id == "watch":
                 return _jsonable(watch_activity(conn, now))
             if desk_id == "research":
                 return _jsonable({"dossiers": research_dossiers(conn, now)})
+            week = now - timedelta(days=7)
+            if desk_id == "factcheck":
+                return _jsonable({"claims": checked_claims(conn, now - timedelta(days=3))})
+            if desk_id == "idea":
+                return _jsonable({"theses": _theses(conn, schedule.tz)})
+            if desk_id == "holdings":
+                return _jsonable({"ratings": ratings(conn)})
+            if desk_id == "analyst":
+                return _jsonable({"debates": debates(conn, week)})
+            if desk_id in ("trader", "risk"):
+                return _jsonable({"plans": plans(conn, since=week)})
+            if desk_id == "front_office":
+                return _jsonable({"briefs": briefs(conn, week)})
+            if desk_id == "scoring":
+                return _jsonable({"scores": recent_scores(conn, week)})
         return {}
 
     @router.get("/briefs/{brief_id}")

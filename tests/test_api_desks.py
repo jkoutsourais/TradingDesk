@@ -60,4 +60,7 @@ def test_desks_and_book_endpoints(db_engine: Engine) -> None:
     assert {"about", "summary", "problems", "failures"} <= set(data_desk)
     watch = client.get("/api/desks/watch").json()
     assert {"triggers", "shifts", "calendar"} <= set(watch)
-    assert client.get("/api/desks/risk").json() == {}
+    for desk in desks["desks"]:
+        assert client.get(f"/api/desks/{desk['id']}").status_code == 200
+    assert client.get("/api/desks/risk").json() == {"plans": []}
+    assert client.get("/api/desks/unknown").json() == {}

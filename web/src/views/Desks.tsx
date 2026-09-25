@@ -87,11 +87,55 @@ function sourceSummary(collectors: CollectorRow[]): string {
   return `${healthy} of ${enabled.length} sources healthy`;
 }
 
+function DeskPage({ desk, collectors }: { desk: DeskRow; collectors: CollectorRow[] }) {
+  const summary = desk.id === "data" ? [sourceSummary(collectors)] : desk.summary;
+  return (
+    <>
+      <div className="box">
+        <div className="box-header">
+          <a href="#/desks" className="muted">Desks</a> / <b>{desk.title}</b>
+          <span className="spacer" />
+          {desk.id === "data" ? (
+            <Health problems={troubledSources(collectors)} noun="source down" />
+          ) : (
+            <Health problems={desk.problems} noun="failure" />
+          )}
+        </div>
+        <div className="box-body">
+          {desk.about}.
+          <div className="muted">
+            Last 24 hours: {summary.length ? summary.join(", ") : "nothing yet"}
+            {desk.last_at ? ` · last activity ${ago(desk.last_at)}` : ""}
+          </div>
+        </div>
+      </div>
+      <DeskDetail desk={desk.id} />
+      {desk.id === "data" && <Sources collectors={collectors} />}
+      {(desk.failures.length > 0 || desk.id !== "data") && (
+        <div className="box">
+          <div className="box-header">
+            Failed runs, last 24 hours
+            {desk.id === "data" && <span className="muted">Most clear on the next run; the Sources table shows what is down now.</span>}
+          </div>
+          <Problems desk={desk} />
+        </div>
+      )}
+    </>
+  );
+}
+
 export function Desks({ selected }: { selected?: string }) {
   const { data, error } = useApi<DesksData>("/api/desks", [], 20_000);
   if (error && !data) return <div className="content"><div className="empty">{error}</div></div>;
   if (!data) return <div className="content"><div className="empty">Loading</div></div>;
   const desk = data.desks.find((d) => d.id === selected);
+  if (desk) {
+    return (
+      <div className="content">
+        <DeskPage desk={desk} collectors={data.collectors} />
+      </div>
+    );
+  }
   return (
     <div className="content">
       <div className="box">
@@ -105,7 +149,7 @@ export function Desks({ selected }: { selected?: string }) {
               {data.desks.map((d) => {
                 const summary = d.id === "data" ? [sourceSummary(data.collectors)] : d.summary;
                 return (
-                  <tr key={d.id} className={d.id === selected ? "selected" : ""}>
+                  <tr key={d.id}>
                     <td>
                       <a href={`#/desks/${d.id}`}><b>{d.title}</b></a>
                       <div className="muted">{d.about}</div>
@@ -126,17 +170,6 @@ export function Desks({ selected }: { selected?: string }) {
           </table>
         </div>
       </div>
-      {selected && <DeskDetail desk={selected} />}
-      {selected === "data" && <Sources collectors={data.collectors} />}
-      {desk && (desk.failures.length > 0 || selected !== "data") && (
-        <div className="box">
-          <div className="box-header">
-            {desk.title} desk: failed runs, last 24 hours
-            {selected === "data" && <span className="muted">Most clear on the next run; the Sources table shows what is down now.</span>}
-          </div>
-          <Problems desk={desk} />
-        </div>
-      )}
     </div>
   );
 }

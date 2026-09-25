@@ -144,6 +144,10 @@ const SCORED: Record<string, string> = {
   holding_rating: "Holding rating",
   analyst_view: "Analyst view",
   position: "Position",
+  plan: "Plan",
+  rating: "Holding rating",
+  view: "Analyst view",
+  verdict: "Debate call",
 };
 
 export function scoredTitle(kind: string): string {

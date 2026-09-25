@@ -12,7 +12,7 @@ function verdictLabel(verdict: string | null) {
   return <span className={`label ${tone}`}>{verdict}</span>;
 }
 
-function ThesisTable({ theses }: { theses: ThesisRow[] }) {
+export function ThesisTable({ theses }: { theses: ThesisRow[] }) {
   if (!theses.length) return <div className="empty">No open theses.</div>;
   return (
     <div className="scroll">
@@ -56,7 +56,7 @@ function ThesisTable({ theses }: { theses: ThesisRow[] }) {
   );
 }
 
-function PlanTable({ plans, vetoed }: { plans: PlanRow[]; vetoed: boolean }) {
+export function PlanTable({ plans, vetoed }: { plans: PlanRow[]; vetoed: boolean }) {
   if (!plans.length) return <div className="empty">{vetoed ? "No vetoes." : "No pending plans."}</div>;
   return (
     <div className="scroll">
@@ -107,7 +107,7 @@ function PlanTable({ plans, vetoed }: { plans: PlanRow[]; vetoed: boolean }) {
   );
 }
 
-function RatingTable({ ratings }: { ratings: RatingRow[] }) {
+export function RatingTable({ ratings }: { ratings: RatingRow[] }) {
   if (!ratings.length) return <div className="empty">No ratings yet.</div>;
   return (
     <div className="scroll">
