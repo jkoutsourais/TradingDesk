@@ -18,6 +18,7 @@ from desk.artifacts.raw_record import RawRecord
 from desk.artifacts.research import Claim, Dossier, VerifiedClaim
 from desk.artifacts.store import ArtifactNotFoundError, get_artifact
 from desk.artifacts.thesis import Thesis
+from desk.artifacts.trade import RiskDecision, TradePlan
 from desk.artifacts.trigger import Trigger
 from desk.config import load_schedule
 
@@ -405,6 +406,90 @@ def pages_router(engine: Engine) -> APIRouter:
             f'<p class="muted">Model {_esc(verdict.model)}, prompt '
             f"{_esc(verdict.prompt_version)}.</p></main>"
         )
+        return _page(title, "".join(body))
+
+    @router.get("/plans/{plan_id}", response_class=HTMLResponse)
+    def plan_page(plan_id: UUID) -> str:
+        plan = load(plan_id)
+        if not isinstance(plan, TradePlan):
+            raise HTTPException(status_code=404, detail="not a trade plan")
+        with engine.connect() as conn:
+            decision_id = conn.execute(
+                text(
+                    "SELECT id FROM artifacts WHERE kind = 'risk_decision' "
+                    "AND payload->>'plan_id' = :p ORDER BY created_at DESC LIMIT 1"
+                ),
+                {"p": str(plan_id)},
+            ).scalar()
+        decision = load(decision_id) if decision_id else None
+        when = plan.created_at.astimezone(tz)
+        title = f"{plan.subject} plan"
+        source = (
+            f'<a href="/theses/{plan.thesis_id}">thesis</a>'
+            if plan.thesis_id
+            else "Buy/Add holding rating"
+        )
+        body = [_header(title, f"{when:%a %b} {when.day}, {when:%H:%M} ET"), "<main>"]
+        body.append(
+            '<div class="banner">A plan for Jon to review. The desk never places orders.</div>'
+        )
+        facts = [
+            ("Structure", f"{plan.structure} {plan.instrument}"),
+            ("Direction", plan.direction),
+            ("Account", plan.account_ref),
+            ("Entry", f"{plan.subject} {plan.entry} ({plan.entry_ref})"),
+            ("Stop", f"{plan.stop} ({plan.stop_ref})"),
+            ("Target", f"{plan.target} ({plan.target_ref})" if plan.target else "-"),
+            ("Expiry", plan.expiry or "-"),
+            ("Cost per unit", f"${plan.unit_cost:,.2f}"),
+            ("Loss per unit at the stop", f"${plan.unit_max_loss:,.2f}"),
+            ("Conviction", f"{plan.conviction}/5"),
+        ]
+        rows = "".join(f"<tr><td>{_esc(k)}</td><td>{_esc(v)}</td></tr>" for k, v in facts)
+        body.append(
+            f"<section><h2>Plan</h2><ul><li>{_esc(plan.rationale)}</li>"
+            f'<li class="muted">From {source}</li></ul>'
+            f'<div class="scroll"><table>{rows}</table></div></section>'
+        )
+        legs = "".join(
+            f"<tr><td>{_esc(leg.action)}</td><td>{_esc(leg.symbol)}</td>"
+            f'<td class="num">{_esc(leg.price)}</td>'
+            f'<td class="muted">{_esc(leg.price_ref)}</td></tr>'
+            for leg in plan.legs
+        )
+        body.append(
+            '<section><h2>Legs</h2><div class="scroll"><table><tr><th>Action</th>'
+            '<th>Symbol</th><th class="num">Price</th><th>Source</th></tr>'
+            f"{legs}</table></div></section>"
+        )
+        if isinstance(decision, RiskDecision):
+            dots = {"pass": "ok", "fail": "failing", "warn": "stale"}
+            checks = "".join(
+                f'<tr><td>{_esc(c.name)}</td><td><span class="dot {dots[c.result]}"></span>'
+                f"{_esc(c.result)}</td><td>{_esc(c.detail)}</td></tr>"
+                for c in decision.checks
+            )
+            summary = (
+                f"{decision.decision}: size {decision.size} "
+                f"(requested {decision.requested_size}), max loss ${decision.max_loss:,.2f} "
+                f"of a ${decision.cap:,.2f} cap ({decision.tier_pct}% tier), "
+                f"cost ${decision.cost:,.2f}"
+            )
+            if decision.funding_needed:
+                summary += f", funding needed ${decision.funding_needed:,.2f}"
+            items = f"<li>{_esc(summary)}</li>"
+            items += "".join(f"<li>Veto: {_esc(r)}</li>" for r in decision.veto_reasons)
+            if decision.risk_note:
+                items += f"<li>{_esc(decision.risk_note)}</li>"
+            body.append(
+                f"<section><h2>Risk decision</h2><ul>{items}</ul>"
+                '<div class="scroll"><table><tr><th>Check</th><th>Result</th><th>Detail</th>'
+                f"</tr>{checks}</table></div></section>"
+            )
+        if plan.alternatives_rejected:
+            items = "".join(f"<li>{_esc(a)}</li>" for a in plan.alternatives_rejected)
+            body.append(f"<section><h2>Alternatives rejected</h2><ul>{items}</ul></section>")
+        body.append("</main>")
         return _page(title, "".join(body))
 
     return router

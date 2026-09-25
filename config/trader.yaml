@@ -1,0 +1,31 @@
+# Trader desk (Phase 7): how a thesis can be expressed. Code builds every choice and its
+# numbers; the model only picks one. Risk rules live in risk.yaml.
+
+# Futures cannot be traded in the Roth; these ETFs stand in for them.
+future_proxies:
+  /GC: GLD
+  /SI: SLV
+  /HG: CPER
+  /CL: USO
+  /NG: UNG
+
+# Daily-reset leveraged funds offered alongside an underlying ETF.
+levered_proxies:
+  GLD: [UGL]
+  SLV: [AGQ]
+  GDX: [NUGT]
+  GDXJ: [JNUG]
+  USO: [UCO]
+  XLE: [ERX]
+  UNG: [BOIL]
+  QQQ: [TQQQ]
+  SPY: [UPRO]
+
+# Option expiries are chosen around the thesis horizon (days to its review date).
+default_horizon_days: 35
+
+# Buy/Add holding ratings become plans at this conviction, by the judge's confidence.
+rating_conviction:
+  high: 4
+  medium: 3
+  low: 2

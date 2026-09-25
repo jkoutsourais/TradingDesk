@@ -295,6 +295,25 @@ def _analyst(conn: Any) -> dict[str, Any]:
     }
 
 
+def _trader(conn: Any) -> dict[str, Any]:
+    """Recent trade plans with the risk desk's decision on each."""
+    rows = conn.execute(
+        text(
+            "SELECT p.id, p.created_at, p.payload->>'subject' AS subject, "
+            "p.payload->>'structure' AS structure, p.payload->>'instrument' AS instrument, "
+            "p.payload->>'conviction' AS conviction, d.payload->>'decision' AS decision, "
+            "(d.payload->>'size')::int AS size, (d.payload->>'max_loss')::numeric AS max_loss, "
+            "(d.payload->>'cost')::numeric AS cost, "
+            "(d.payload->>'funding_needed')::numeric AS funding, "
+            "d.payload->'veto_reasons'->>0 AS veto FROM artifacts p "
+            "LEFT JOIN artifacts d ON d.kind = 'risk_decision' "
+            "AND d.payload->>'plan_id' = p.id::text "
+            "WHERE p.kind = 'trade_plan' ORDER BY p.created_at DESC LIMIT 20"
+        )
+    ).mappings()
+    return {"plans": [dict(row) for row in rows]}
+
+
 def _commits() -> list[str]:
     try:
         completed = subprocess.run(
@@ -328,6 +347,7 @@ def build_status(engine: Engine, now: datetime | None = None) -> dict[str, Any]:
             "research": _research(conn, now),
             "ideas": _ideas(conn),
             "analyst": _analyst(conn),
+            "trader": _trader(conn),
             "commits": _commits(),
         }
 

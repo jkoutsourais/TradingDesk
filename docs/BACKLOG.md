@@ -32,3 +32,8 @@ Items noted during the build that are out of scope for the phase in which they c
 - **Fundamentals feed for skeptical value (Phase 6).** The skeptical-value persona has no valuation or balance-sheet data. Finnhub's free basic-financials endpoint could supply P/E, margins and debt as code-computed facts; a new collector needs approval.
 - **Debate quality tuning (Phase 6).** The first live rating (SMR, 2026-09-23) showed the keeper misreading a negative distance from the 50-day average as above it; the bear caught it. Review a week of debates and tune persona prompts and fact labels.
 - **Ratings for futures and options holdings (Phase 6).** Rating facts use the underlying's daily bars; option greeks and roll costs are not in the facts yet.
+- **Research drops whole dossiers for one bad claim (Phase 4).** The first live post-market shift (2026-09-24) failed 5 of 11 dossiers on paraphrased quotes and section numbers missing from cited quotes. Proposal: after the retry, keep the claims that pass, drop the rest and record them on the dossier, instead of failing the dossier.
+- **Proxy duplicates in the shortlist (Phase 5).** /NG and UNG were shortlisted together on 2026-09-24. Dedupe candidates through `config/trader.yaml` future proxies.
+- **Thesis and rating wording (Phases 5-6).** The first live NRG short thesis read "pullback to the 20-day high", the XLU thesis inverted its levels twice, and the AEP rating invented a fact id. Review prompts after a week of runs.
+- **Futures margin check (Phase 7).** Futures plans only fit a funded margin account; the liquidity check warns that margin is not checked.
+- **Plan tracking against fills (Phase 8).** Plans are not linked to what Jon actually trades until fill capture exists.

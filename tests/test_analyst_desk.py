@@ -34,11 +34,13 @@ from desk.desks.holdings.flags import (
     risk_flags,
 )
 from desk.desks.holdings.rating import apply_flags
+from desk.desks.risk.config import load_risk_config
 from desk.llm.client import StructuredResult, Usage
 from desk.llm.facts import Fact
 from desk.watch.calendar import MarketCalendar, load_calendar_config
 
 HOLDINGS = load_holdings_config()
+LEVERAGE = load_risk_config().levered_funds
 TODAY = date(2026, 9, 24)
 
 
@@ -53,15 +55,15 @@ def test_option_expiry_formats() -> None:
 
 def test_risk_flags_and_forcing() -> None:
     big = Holding("AEP", ["ibkr:0000"], {"equity"}, max_share_pct=40.0)
-    flags = risk_flags(big, HOLDINGS, TODAY)
+    flags = risk_flags(big, HOLDINGS, LEVERAGE, TODAY)
     assert flags[0].code == "concentration" and flags[0].forces == "trim"
     levered = Holding("TQQQ", ["ibkr:0000"], {"equity"}, first_seen=TODAY - timedelta(days=6))
-    assert risk_flags(levered, HOLDINGS, TODAY)[0].forces is None
+    assert risk_flags(levered, HOLDINGS, LEVERAGE, TODAY)[0].forces is None
     old = Holding("TQQQ", ["ibkr:0000"], {"equity"}, first_seen=TODAY - timedelta(days=20))
-    assert risk_flags(old, HOLDINGS, TODAY)[0].forces == "trim"
+    assert risk_flags(old, HOLDINGS, LEVERAGE, TODAY)[0].forces == "trim"
     expiring = Holding("SLV", ["ibkr:0000"], {"option"}, expiries=[TODAY + timedelta(days=2)])
-    assert risk_flags(expiring, HOLDINGS, TODAY)[0].forces == "sell"
-    assert risk_flags(Holding("AEP", ["ibkr:0000"], {"equity"}), HOLDINGS, TODAY) == []
+    assert risk_flags(expiring, HOLDINGS, LEVERAGE, TODAY)[0].forces == "sell"
+    assert risk_flags(Holding("AEP", ["ibkr:0000"], {"equity"}), HOLDINGS, LEVERAGE, TODAY) == []
 
 
 def test_apply_flags_only_raises_severity() -> None:
@@ -255,6 +257,7 @@ def test_pre_market_rates_holdings_and_debates_theses(db_engine: Engine) -> None
             load_tiers(),
             load_universe(),
             HOLDINGS,
+            LEVERAGE,
             MarketCalendar(load_calendar_config()),
             now,
             now + timedelta(hours=1),
@@ -309,6 +312,7 @@ def test_pre_market_rates_holdings_and_debates_theses(db_engine: Engine) -> None
             load_tiers(),
             load_universe(),
             HOLDINGS,
+            LEVERAGE,
             MarketCalendar(load_calendar_config()),
             now,
             now + timedelta(hours=1),

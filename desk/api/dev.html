@@ -64,6 +64,7 @@
 </header>
 <main>
   <section><h2>Triggers, last 24 hours</h2><div id="triggers" class="scroll"></div></section>
+  <section><h2>Trade plans</h2><div id="plans" class="scroll"></div></section>
   <section><h2>Holdings ratings</h2><div id="ratings" class="scroll"></div></section>
   <section><h2>Debates</h2><div id="verdicts" class="scroll"></div></section>
   <section><h2>Theses</h2><div id="theses" class="scroll"></div></section>
@@ -113,6 +114,21 @@
         <td>${t.tier === null ? "-" : esc(t.tier)}</td>
         <td class="muted">${esc(t.rule)}</td>
         <td class="wrap" style="color: var(--fg)">${esc(t.summary)}</td></tr>`));
+
+    document.getElementById("plans").innerHTML = table(
+      `<th>Subject</th><th>Structure</th><th>Decision</th><th class="num">Size</th>
+       <th class="num">Max loss</th><th class="num">Cost</th><th class="num">Funding</th>
+       <th>Veto</th><th>When</th>`,
+      data.trader.plans.map((p) => `<tr>
+        <td><a href="/plans/${esc(p.id)}">${esc(p.subject)}</a></td>
+        <td>${esc(p.structure)} <span class="muted">${esc(p.instrument)}</span></td>
+        <td><span class="dot ${p.decision === "vetoed" ? "failing" : p.decision ? "ok" : "idle"}"></span>${esc(p.decision || "pending")}</td>
+        <td class="num">${p.size ?? "-"}</td>
+        <td class="num">${p.max_loss === null ? "-" : num(p.max_loss)}</td>
+        <td class="num">${p.cost === null ? "-" : num(p.cost)}</td>
+        <td class="num">${p.funding === null ? "-" : num(p.funding)}</td>
+        <td class="wrap muted">${esc(p.veto || "")}</td>
+        <td>${time(p.created_at)}</td></tr>`));
 
     const analyst = data.analyst;
     const ratingName = {buy_add: "Buy/Add", hold: "Hold", trim: "Trim", sell: "Sell"};

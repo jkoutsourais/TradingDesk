@@ -46,7 +46,7 @@ ignore = ["S101"]
 [tool.mypy]
 python_version = "3.12"
 plugins = ["pydantic.mypy"]
-files = ["desk/artifacts"]
+files = ["desk/artifacts", "desk/desks/risk"]
 strict = true
 
 [tool.pytest.ini_options]

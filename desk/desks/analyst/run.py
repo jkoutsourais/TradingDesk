@@ -7,6 +7,7 @@ due again at the next pre-market shift.
 
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from decimal import Decimal
 from uuid import UUID
 
 from sqlalchemy import Engine
@@ -51,6 +52,7 @@ async def run_analyst_desks(
     tiers: TiersConfig,
     universe: UniverseConfig,
     holdings_config: HoldingsConfig,
+    leverage_by_fund: dict[str, Decimal],
     calendar: MarketCalendar,
     now: datetime,
     deadline: datetime,
@@ -80,7 +82,7 @@ async def run_analyst_desks(
             model,
             keeper,
             holding,
-            risk_flags(holding, holdings_config, today),
+            risk_flags(holding, holdings_config, leverage_by_fund, today),
             linked_thesis(theses, holding.symbol),
             now,
             tz,

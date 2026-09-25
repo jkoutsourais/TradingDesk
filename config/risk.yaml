@@ -1,0 +1,77 @@
+# Risk desk (Phase 7): pure code with a hard veto. Every value here is read by
+# desk/desks/risk/rules.py; each check it runs is logged pass/warn/fail on the RiskDecision.
+
+# Accounts are matched by broker; the account type sets what may be traded there.
+accounts:
+  ibkr: roth
+  tastytrade: individual
+
+account_types:
+  roth:
+    # No short stock, naked options, margin or futures.
+    structures: [shares, etf, levered_etf, long_call, long_put, debit_spread]
+    allow_short_shares: false
+    settled_cash_only: true
+  individual:
+    structures: [shares, etf, levered_etf, long_call, long_put, debit_spread, future]
+    allow_short_shares: true
+    settled_cash_only: false
+
+# Max loss per trade, percent of the account's net liquidation.
+tier_pct:
+  shares: 5
+  etf: 5
+  levered_etf: 2
+  long_call: 2
+  long_put: 2
+  debit_spread: 2
+  future: 2
+
+# Share of the tier cap used at each conviction; 1 and 2 are watch-only.
+conviction_scale:
+  1: 0
+  2: 0
+  3: 0.5
+  4: 0.75
+  5: 1.0
+
+# Percent of combined net liquidation across accounts.
+total_open_risk_pct: 15
+bucket_cap_pct: 8
+
+# Correlated names whose open risk is capped together.
+buckets:
+  metals: [/GC, /SI, /HG, GLD, SLV, GDX, GDXJ, SIL, NEM, AEM, WPM, FNV, NUGT, JNUG, AGQ, UGL, CPER]
+  energy: [/CL, /NG, USO, UNG, XLE, XOP, OIH, XOM, CVX, COP, OXY, EQT, ERX, UCO, BOIL, KOLD, SCO]
+  power: [VST, CEG, NRG, TLN, GEV, ETN, PWR, VRT, NEE, XLU, AEP, SMR, OKLO, FLNC]
+
+# Daily-reset leveraged funds: leverage, and the underlying bucket they add exposure to.
+levered_funds:
+  NUGT: 2
+  JNUG: 2
+  AGQ: 2
+  UGL: 2
+  TQQQ: 3
+  SQQQ: 3
+  SOXL: 3
+  SOXS: 3
+  UPRO: 3
+  SPXU: 3
+  TNA: 3
+  FAS: 3
+  ERX: 2
+  BOIL: 2
+  KOLD: 2
+  UCO: 2
+  SCO: 2
+
+liquidity:
+  max_option_spread_pct: 10
+  min_open_interest: 100
+
+# Existing holdings without a thesis count as if stopped this many daily ATRs below the
+# last close (decided 2026-09-24); a linked thesis's hard line replaces the assumption.
+assumed_stop_atr: 2
+
+# The trade's stop must sit within this share of the thesis hard line, after mapping.
+stop_tolerance_pct: 1.0

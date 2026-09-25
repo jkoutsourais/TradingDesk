@@ -37,7 +37,6 @@ class Concentration(_Frozen):
 
 
 class LeveredFunds(_Frozen):
-    leverage: dict[str, float]
     warn_days: int = Field(gt=0)
     trim_days: int = Field(gt=0)
 
@@ -116,7 +115,9 @@ def load_holdings(conn: Connection, tz: ZoneInfo) -> list[Holding]:
     return sorted(holdings.values(), key=lambda h: h.symbol)
 
 
-def risk_flags(holding: Holding, config: HoldingsConfig, today: date) -> list[RiskFlag]:
+def risk_flags(
+    holding: Holding, config: HoldingsConfig, leverage_by_fund: dict[str, Decimal], today: date
+) -> list[RiskFlag]:
     flags = []
     share = holding.max_share_pct
     if share is not None and share >= config.concentration.warn_pct:
@@ -128,7 +129,7 @@ def risk_flags(holding: Holding, config: HoldingsConfig, today: date) -> list[Ri
                 forces=forced,
             )
         )
-    leverage = config.levered_funds.leverage.get(holding.symbol)
+    leverage = leverage_by_fund.get(holding.symbol)
     if leverage is not None and holding.first_seen is not None:
         days = (today - holding.first_seen).days
         if days >= config.levered_funds.warn_days:

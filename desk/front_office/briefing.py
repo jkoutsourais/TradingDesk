@@ -22,6 +22,7 @@ from desk.artifacts.base import ArtifactStatus
 from desk.artifacts.brief import Brief, BriefSection, FactSnapshot, SnapshotFact
 from desk.artifacts.store import append_artifact, get_artifact
 from desk.artifacts.thesis import Thesis
+from desk.artifacts.trade import RiskDecision, TradePlan
 from desk.collectors.holdings import latest_snapshots
 from desk.config import ChatModel
 from desk.desks.analyst.debate import chain_ids, latest_verdicts
@@ -504,6 +505,42 @@ def rating_lines(conn: Connection, covers_from: datetime) -> tuple[list[str], li
     return lines, ids
 
 
+def plan_lines(conn: Connection, covers_from: datetime) -> tuple[list[str], list[str], list[UUID]]:
+    """Code-written lines for plans made since the last close: sized plans and vetoes."""
+    rows = conn.execute(
+        text(
+            "SELECT p.id AS plan_id, d.id AS decision_id FROM artifacts p "
+            "JOIN artifacts d ON d.kind = 'risk_decision' AND d.payload->>'plan_id' = p.id::text "
+            "WHERE p.kind = 'trade_plan' AND p.created_at >= :since ORDER BY p.created_at"
+        ),
+        {"since": covers_from},
+    ).all()
+    sized, vetoed, ids = [], [], []
+    for row in rows:
+        plan = get_artifact(conn, row.plan_id)
+        decision = get_artifact(conn, row.decision_id)
+        assert isinstance(plan, TradePlan) and isinstance(decision, RiskDecision)
+        name = f"{plan.subject}: {plan.structure.replace('_', ' ')} {plan.instrument}"
+        ids += [plan.id, decision.id]
+        if decision.decision == "vetoed":
+            vetoed.append(f"{name}. {decision.veto_reasons[0]}")
+            continue
+        line = (
+            f"{name}, {plan.direction}, size {decision.size}"
+            + (" (resized)" if decision.decision == "resized" else "")
+            + f", max loss ${decision.max_loss:,.2f}, cost ${decision.cost:,.2f}."
+            + f" Stop {plan.subject} ${plan.stop:,}"
+            + (f", target ${plan.target:,}" if plan.target else "")
+            + "."
+        )
+        if decision.funding_needed:
+            line += f" Needs ${decision.funding_needed:,.2f} more settled cash."
+        if decision.risk_note:
+            line += f" Risk: {decision.risk_note}"
+        sized.append(line)
+    return sized, vetoed, ids
+
+
 # --- Build --------------------------------------------------------------------------------
 
 
@@ -619,7 +656,8 @@ async def build_briefing(
     with engine.connect() as conn:
         theses = thesis_sections(conn, calendar.tz, covers_from)
         ratings, rating_ids = rating_lines(conn, covers_from)
-    theses.ids += rating_ids
+        plans, vetoes, plan_ids = plan_lines(conn, covers_from)
+    theses.ids += rating_ids + plan_ids
     sections.insert(
         min(3, len(sections)),
         BriefSection(
@@ -636,6 +674,13 @@ async def build_briefing(
     sections.append(
         BriefSection(title="Your theses", lines=tuple(theses.yours) or ("No open theses.",))
     )
+    sections.append(
+        BriefSection(
+            title="Trade plans",
+            lines=tuple(plans) or ("No new plans this morning.",),
+        )
+    )
+    sections.append(BriefSection(title="Vetoed", lines=tuple(vetoes) or ("No vetoes.",)))
     sections.append(BriefSection(title="Calendar", lines=calendar_lines))
 
     brief = Brief(

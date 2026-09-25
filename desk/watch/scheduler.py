@@ -7,7 +7,8 @@ One process, two parts:
   workers  claim jobs from the Postgres queue, run them, and record each run in job_runs
 
 Every shift starts by unloading all Ollama models (the GPU rule), then runs its desks:
-  pre_market   triage rounds (small), then holdings ratings and thesis debates (deep)
+  pre_market   triage rounds (small), then holdings ratings, thesis debates, trade plans
+               and risk decisions (deep; the risk desk itself is code)
   briefing     morning brief on the deep model, pushed through ntfy
   post_market  idea lanes, research (deep), fact-check (small), theses (deep) and
                thesis state checks; see desk.desks.idea.run
@@ -26,6 +27,7 @@ import httpx
 from sqlalchemy import Engine, text
 
 from desk.collectors.__main__ import configure_logging
+from desk.collectors.tastytrade_session import TastytradeConnection
 from desk.config import (
     ModelsConfig,
     TiersConfig,
@@ -40,6 +42,10 @@ from desk.desks.analyst.run import run_analyst_desks
 from desk.desks.holdings.flags import HoldingsConfig, load_holdings_config
 from desk.desks.idea.lanes import LanesConfig, load_lanes_config
 from desk.desks.idea.run import run_post_market
+from desk.desks.risk.config import RiskConfig, load_risk_config
+from desk.desks.trader.menu import TraderConfig, load_trader_config
+from desk.desks.trader.options import OptionSource, TastytradeOptions
+from desk.desks.trader.run import run_trader_desk
 from desk.front_office.briefing import build_briefing, push_briefing
 from desk.front_office.intake import process_pending
 from desk.front_office.notify import NotifyConfig, NtfyClient, load_notify_config
@@ -331,6 +337,9 @@ class Deps:
     lanes: LanesConfig
     personas: dict[str, Persona]
     holdings: HoldingsConfig
+    risk: RiskConfig
+    trader: TraderConfig
+    options: OptionSource | None
     futures: frozenset[str]
     notify: NotifyConfig
     ntfy: NtfyClient | None
@@ -482,15 +491,31 @@ class Worker:
             deps.tiers,
             deps.universe,
             deps.holdings,
+            deps.risk.levered_funds,
             deps.calendar,
             now,
             deadline,
             shift_id,
         )
+        trader = await run_trader_desk(
+            self._engine,
+            deps.chat,
+            deps.models.deep,
+            deps.options,
+            deps.risk,
+            deps.trader,
+            deps.tiers,
+            deps.universe,
+            deps.calendar.tz,
+            datetime.now(UTC),
+            deadline,
+            shift_id,
+        )
         await deps.chat.unload(deps.models.deep.model)
-        if outcome.errors and report.error is None:
-            report.error = "; ".join(outcome.errors)[:1000]
-        return outcome.notes + outcome.errors[:5]
+        errors = outcome.errors + trader.errors
+        if errors and report.error is None:
+            report.error = "; ".join(errors)[:1000]
+        return outcome.notes + trader.notes + errors[:5]
 
     async def _post_market(self, shift_id: UUID, report: RunReport) -> list[str]:
         deps = self._deps
@@ -622,6 +647,14 @@ async def run(engine: Engine, settings: Settings) -> None:
     )
     if ntfy is None:
         logger.warning("NTFY_TOPIC is not set: briefings and urgent alerts will not be pushed")
+    secret, refresh = settings.tastytrade_client_secret, settings.tastytrade_refresh_token
+    tastytrade = (
+        TastytradeConnection(secret.get_secret_value(), refresh.get_secret_value())
+        if secret and refresh
+        else None
+    )
+    if tastytrade is None:
+        logger.warning("tastytrade credentials are not set: trade plans will offer no options")
     deps = Deps(
         ollama_base_url=settings.ollama_base_url,
         chat=OllamaChat(settings.ollama_base_url),
@@ -634,6 +667,9 @@ async def run(engine: Engine, settings: Settings) -> None:
         lanes=load_lanes_config(),
         personas=load_personas(),
         holdings=load_holdings_config(),
+        risk=load_risk_config(),
+        trader=load_trader_config(),
+        options=TastytradeOptions(tastytrade) if tastytrade else None,
         futures=frozenset(s for s in tiers.tier_1_symbols() if s.startswith("/")),
         notify=load_notify_config(),
         ntfy=ntfy,
@@ -649,6 +685,8 @@ async def run(engine: Engine, settings: Settings) -> None:
         await deps.embedder.aclose()
         if ntfy is not None:
             await ntfy.aclose()
+        if tastytrade is not None:
+            await tastytrade.aclose()
 
 
 def main() -> None:
