@@ -44,6 +44,7 @@ export function useApi<T>(path: string, kinds: string[] = [], intervalMs = 60_00
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [failures, setFailures] = useState(0);
   const timer = useRef<number | null>(null);
 
   const reload = useCallback(() => {
@@ -51,8 +52,12 @@ export function useApi<T>(path: string, kinds: string[] = [], intervalMs = 60_00
       .then((value) => {
         setData(value);
         setError(null);
+        setFailures(0);
       })
-      .catch((reason: unknown) => setError(String(reason)))
+      .catch((reason: unknown) => {
+        setError(String(reason));
+        setFailures((n) => n + 1);
+      })
       .finally(() => setLoading(false));
   }, [path]);
 
@@ -62,6 +67,14 @@ export function useApi<T>(path: string, kinds: string[] = [], intervalMs = 60_00
     const id = window.setInterval(reload, intervalMs);
     return () => window.clearInterval(id);
   }, [reload, intervalMs]);
+
+  // After a failed load (the API restarting, the tunnel reconnecting) retry every few
+  // seconds instead of waiting for the regular interval.
+  useEffect(() => {
+    if (failures === 0) return;
+    const id = window.setTimeout(reload, 5000);
+    return () => window.clearTimeout(id);
+  }, [failures, reload]);
 
   const kindKey = kinds.join(",");
   useArtifactEvents((event) => {

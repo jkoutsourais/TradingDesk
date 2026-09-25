@@ -11,6 +11,7 @@ import {
 import type { Icon } from "@primer/octicons-react";
 import { lazy, Suspense, useMemo } from "react";
 
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { Palette, type Command } from "./components/Palette";
 import { StatusBar } from "./components/StatusBar";
 import { useHashRoute } from "./hooks";
@@ -127,9 +128,12 @@ export function App() {
             Ctrl+K
           </a>
         </div>
-        <Suspense fallback={<div className="content"><div className="empty">Loading</div></div>}>
-          <View route={route} />
-        </Suspense>
+        {/* Keyed by route so a failed view resets when Jon navigates away. */}
+        <ErrorBoundary key={route.join("/")}>
+          <Suspense fallback={<div className="content"><div className="empty">Loading</div></div>}>
+            <View route={route} />
+          </Suspense>
+        </ErrorBoundary>
       </main>
       <StatusBar />
       <Palette commands={commands} />

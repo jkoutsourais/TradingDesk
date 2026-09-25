@@ -62,7 +62,7 @@ function LinkForm({ positionId, onDone }: { positionId: string; onDone: () => vo
 
 export function Book() {
   const { data, error, reload } = useApi<BookData>("/api/book", ["fill", "position", "holding_rating", "score"]);
-  if (error) return <div className="content"><div className="empty">{error}</div></div>;
+  if (error && !data) return <div className="content"><div className="empty">{error}</div></div>;
   if (!data) return <div className="content"><div className="empty">Loading</div></div>;
   const ratings = Object.fromEntries(data.ratings.map((r) => [r.subject, r]));
   return (

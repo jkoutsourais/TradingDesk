@@ -204,3 +204,12 @@ def test_cot_extreme_and_eia_surprise(db_conn: Connection) -> None:
     assert "long" in hits["cot_extreme"].summary
     assert hits["eia_surprise"].instrument == "/CL"
     assert "build, above the seasonal norm" in hits["eia_surprise"].summary
+
+
+def test_wide_quotes_do_not_count_as_prices() -> None:
+    from desk.watch.scan import usable_mid
+
+    assert usable_mid(Decimal("36.09"), Decimal("36.14")) == 36.115
+    assert usable_mid(Decimal("71.65"), Decimal("73.37")) is None
+    assert usable_mid(None, Decimal("1")) is None
+    assert usable_mid(Decimal("0"), Decimal("1")) is None

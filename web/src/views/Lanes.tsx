@@ -233,7 +233,7 @@ export function Lanes() {
   const [sort, setSort] = useState<{ key: SortKey; desc: boolean }>({ key: "candidates", desc: true });
   const board = useMemo(() => (data ? boardNodes(data) : null), [data]);
 
-  if (error) return <div className="content"><div className="box"><div className="empty">{error}</div></div></div>;
+  if (error && !data) return <div className="content"><div className="box"><div className="empty">{error}</div></div></div>;
   if (!data || !board) return <div className="content"><div className="empty">Loading</div></div>;
   if (!data.selection) return <div className="content"><div className="empty">No idea selection yet; the first appears after a post-market shift.</div></div>;
 

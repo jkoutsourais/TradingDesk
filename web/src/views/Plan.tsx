@@ -46,7 +46,7 @@ interface PlanDetail {
 
 export function PlanView({ id }: { id: string }) {
   const { data, error } = useApi<PlanDetail>(`/api/plans/${id}`, ["risk_decision"]);
-  if (error) return <div className="content"><div className="empty">{error}</div></div>;
+  if (error && !data) return <div className="content"><div className="empty">{error}</div></div>;
   if (!data) return <div className="content"><div className="empty">Loading</div></div>;
   const { plan, decision } = data;
   const rows: [string, string][] = [

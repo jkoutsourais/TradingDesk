@@ -52,7 +52,7 @@ export function Scores() {
   const { data, error } = useApi<ScoresData>(`/api/scores?horizon=${horizon}`, ["score"]);
   const lanes = useMemo(() => (data ? hitChart(data.dimensions.lane ?? []) : null), [data]);
   const personas = useMemo(() => (data ? hitChart(data.dimensions.persona ?? []) : null), [data]);
-  if (error) return <div className="content"><div className="empty">{error}</div></div>;
+  if (error && !data) return <div className="content"><div className="empty">{error}</div></div>;
   if (!data) return <div className="content"><div className="empty">Loading</div></div>;
   return (
     <div className="content">

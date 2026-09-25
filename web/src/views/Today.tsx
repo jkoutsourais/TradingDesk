@@ -183,13 +183,13 @@ export function BriefCard({ brief }: { brief: Brief | null }) {
 /** A briefing a push linked to; "latest" and unknown ids fall back to Today. */
 export function BriefView({ id }: { id: string }) {
   const { data, error } = useApi<Brief>(`/api/briefs/${id}`);
-  if (error) return <Today />;
+  if (error && !data) return <Today />;
   return <div className="content">{data ? <BriefCard brief={data} /> : <div className="empty">Loading</div>}</div>;
 }
 
 export function Today() {
   const { data, error } = useApi<TodayData>("/api/today", KINDS);
-  if (error) return <div className="content"><div className="box"><div className="empty">{error}</div></div></div>;
+  if (error && !data) return <div className="content"><div className="box"><div className="empty">{error}</div></div></div>;
   if (!data) return <div className="content"><div className="empty">Loading</div></div>;
   return (
     <div className="content">

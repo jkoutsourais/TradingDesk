@@ -147,33 +147,71 @@ function WatchView({ data }: { data: WatchDetail }) {
   );
 }
 
+/** "claim c2: quote is not word for word...; section ...: numbers ..." as a short count. */
+function failureSummary(error: string | null): string {
+  if (!error) return "failed";
+  const problems = error.split("; ").filter(Boolean);
+  const quotes = problems.filter((p) => p.includes("word for word")).length;
+  const numbers = problems.filter((p) => p.includes("numbers") || p.includes("number")).length;
+  const parts = [];
+  if (quotes) parts.push(`${quotes} quote${quotes > 1 ? "s" : ""} not found in the source`);
+  if (numbers) parts.push(`${numbers} number check${numbers > 1 ? "s" : ""} failed`);
+  const other = problems.length - quotes - numbers;
+  if (other > 0) parts.push(`${other} other problem${other > 1 ? "s" : ""}`);
+  return parts.length ? `Rejected after retry: ${parts.join(", ")}` : error.slice(0, 120);
+}
+
 function ResearchView({ data }: { data: ResearchDetail }) {
+  const failed = data.dossiers.filter((d) => d.status === "failed").length;
   return (
     <div className="box">
-      <div className="box-header">Dossiers, last 36 hours</div>
+      <div className="box-header">
+        Dossiers, last 36 hours
+        <span className="muted">
+          {data.dossiers.length - failed} written, {failed} rejected by the fact checks
+        </span>
+      </div>
       {data.dossiers.length === 0 ? <div className="empty">None yet.</div> : (
         <div className="scroll">
           <table>
             <thead>
-              <tr><th>Subject</th><th>Kind</th><th className="num">Score</th><th className="num">Claims</th><th className="num">Verified</th><th className="num">Corrected</th><th className="num">Rejected</th><th className="num">Pending</th><th className="num">Evidence</th><th>When</th></tr>
+              <tr>
+                <th>Subject</th>
+                <th>Kind</th>
+                <th className="num">Score</th>
+                <th className="num">Claims</th>
+                <th className="num">Verified</th>
+                <th className="num">Corrected</th>
+                <th className="num">Rejected</th>
+                <th className="num">Pending</th>
+                <th className="num">Evidence</th>
+                <th>When</th>
+              </tr>
             </thead>
             <tbody>
               {data.dossiers.map((d) => (
                 <tr key={d.id}>
-                  <td>
+                  <td style={{ maxWidth: 420 }}>
                     <a href={`#/trace/${d.id}`}><b>{d.subject}</b></a>
-                    {d.why && <div className="muted">{d.why}</div>}
-                    {d.status === "failed" && <div className="neg">{d.error}</div>}
+                    {d.why && <div className="muted" style={{ fontSize: 12 }}>{d.why}</div>}
+                    {d.status === "failed" && (
+                      <details style={{ fontSize: 12 }}>
+                        <summary className="muted">{failureSummary(d.error)}</summary>
+                        <ul className="lines muted" style={{ padding: "4px 0 4px 16px" }}>
+                          {(d.error ?? "").split("; ").map((problem, i) => <li key={i}>{problem}</li>)}
+                        </ul>
+                      </details>
+                    )}
                   </td>
-                  <td>{d.subject_kind}</td>
-                  <td className="num">{num(d.score)}</td>
-                  <td className="num">{count(d.claims)}</td>
-                  <td className="num">{count(d.verified)}</td>
-                  <td className="num">{count(d.corrected)}</td>
-                  <td className="num">{count(d.rejected)}</td>
-                  <td className="num">{count(d.pending)}</td>
-                  <td className="num">{num(d.evidence)}</td>
-                  <td>{time(d.created_at)}</td>
+                  <td>{d.status === "failed" ? <span className="label danger">failed</span> : <span className="label">{d.subject_kind}</span>}</td>
+                  <td className="num">{d.score === null ? "" : num(d.score)}</td>
+                  <td className="num">{d.status === "failed" ? "" : count(d.claims)}</td>
+                  <td className="num">{d.verified ? count(d.verified) : ""}</td>
+                  <td className="num">{d.corrected ? count(d.corrected) : ""}</td>
+                  <td className="num">{d.rejected ? count(d.rejected) : ""}</td>
+                  <td className="num">{d.pending ? count(d.pending) : ""}</td>
+                  <td className="num">{d.evidence === null ? "" : num(d.evidence)}</td>
+                  <td className="muted">{time(d.created_at)}</td>
                 </tr>
               ))}
             </tbody>

@@ -66,12 +66,12 @@ def level_menu(instrument: str, bars: list[DailyBar], start_index: int = 1) -> l
             candidates += [
                 (
                     f"close_minus_{multiple}atr",
-                    f"last close minus {multiple} ATR",
+                    f"{multiple} ATR below the last close",
                     last.close - multiple * step,
                 ),
                 (
                     f"close_plus_{multiple}atr",
-                    f"last close plus {multiple} ATR",
+                    f"{multiple} ATR above the last close",
                     last.close + multiple * step,
                 ),
             ]

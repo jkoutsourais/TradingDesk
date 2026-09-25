@@ -24,7 +24,7 @@ from desk.artifacts.store import append_artifact
 from desk.artifacts.trigger import ObservedValue, Trigger
 from desk.collectors.embeddings import record_text
 from desk.collectors.holdings import held_symbols
-from desk.config import TiersConfig, UniverseConfig
+from desk.config import TiersConfig, UniverseConfig, load_sources
 from desk.watch.calendar import MarketCalendar, MarketPhase
 from desk.watch.rules import (
     CLOSE_RULES,
@@ -67,6 +67,10 @@ EIA_INSTRUMENTS = {
     "PET.W_EPC0_SAX_YCUOK_MBBL.W": "/CL",
     "NG.NW2_EPG0_SWO_R48_BCF.W": "/NG",
 }
+# Readable names for EIA series in trigger summaries (config/sources.yaml).
+EIA_LABELS = load_sources().eia.series
+# Widest bid-ask spread, as a share of the midpoint, whose midpoint counts as a price.
+MAX_QUOTE_SPREAD = 0.005
 EXTENDED_HOURS_RULES = (rule_move_vs_prior_close, rule_range_break)
 
 
@@ -185,6 +189,21 @@ def load_session_bars(
     }
 
 
+def usable_mid(bid: Any, ask: Any) -> float | None:
+    """The quote midpoint when the market is tight enough to stand for a trade price.
+
+    Outside regular hours quotes can be a dollar or more wide on a thin book; their
+    midpoint fired false "12 ATR" moves (TECH, 2026-09-24), so wide quotes are skipped.
+    """
+    if bid is None or ask is None:
+        return None
+    low, high = float(bid), float(ask)
+    if low <= 0 or high < low:
+        return None
+    mid = (low + high) / 2
+    return mid if (high - low) / mid <= MAX_QUOTE_SPREAD else None
+
+
 def load_features(
     conn: Connection,
     symbols: list[str],
@@ -236,14 +255,14 @@ def load_features(
             continue
         f = Features(symbol=symbol, bars=bars, daily_ref=f"price_bars:yahoo:{symbol}:1d")
         quote = quotes.get(symbol)
+        mid = usable_mid(quote.bid, quote.ask) if quote is not None else None
         if (
             quote is not None
-            and quote.bid is not None
-            and quote.ask is not None
+            and mid is not None
             and quote.quote_time is not None
             and now - quote.quote_time <= QUOTE_MAX_AGE
         ):
-            f.last = (float(quote.bid) + float(quote.ask)) / 2
+            f.last = mid
             f.last_ref = f"quotes_latest:{symbol}:{quote.quote_time.isoformat()}"
         if session is not None:
             f.session_minutes = (session.close - session.open).total_seconds() / 60
@@ -640,7 +659,7 @@ def commodity_hits(conn: Connection, config: WatchConfig) -> list[Hit]:
                 rule_id="eia_surprise",
                 instrument=instrument,
                 summary=(
-                    f"EIA {series_id}: weekly {direction} "
+                    f"EIA {EIA_LABELS.get(series_id, series_id)}: weekly {direction} "
                     f"({z:+.1f} sigma vs the same week in 5 years)"
                 ),
                 fingerprint=f"eia_surprise:{series_id}:{latest.isoformat()}",

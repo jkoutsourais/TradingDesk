@@ -30,8 +30,10 @@ if ($LASTEXITCODE -ne 0) { throw "copying the bundle failed" }
 scp -q (Join-Path $PSScriptRoot "dashboard-up.sh") "${HostName}:~/desk/dashboard-up.sh"
 if ($LASTEXITCODE -ne 0) { throw "copying dashboard-up.sh failed" }
 
-# The site directory is bind-mounted into Caddy, so swap its contents in place.
-ssh $HostName "mkdir -p ~/desk/site && find ~/desk/site -mindepth 1 -delete && cp -r ~/desk/incoming/. ~/desk/site/ && chmod +x ~/desk/dashboard-up.sh"
+# The site directory is bind-mounted into Caddy. New files are copied over the old ones and
+# older hashed assets are kept for two weeks, so a page opened before this publish can
+# still load the code it asks for.
+ssh $HostName "mkdir -p ~/desk/site/assets && cp -r ~/desk/incoming/. ~/desk/site/ && find ~/desk/site/assets -type f -mtime +14 -delete && chmod +x ~/desk/dashboard-up.sh"
 if ($LASTEXITCODE -ne 0) { throw "installing the bundle failed" }
 
 if ($Setup) {

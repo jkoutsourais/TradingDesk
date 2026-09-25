@@ -51,7 +51,7 @@ function DeskJobs({ desk }: { desk: DeskRow }) {
 export function Desks({ selected }: { selected?: string }) {
   const { data, error } = useApi<DesksData>("/api/desks", [], 20_000);
   const [showCollectors, setShowCollectors] = useState(selected === "data");
-  if (error) return <div className="content"><div className="empty">{error}</div></div>;
+  if (error && !data) return <div className="content"><div className="empty">{error}</div></div>;
   if (!data) return <div className="content"><div className="empty">Loading</div></div>;
   const desks = selected ? data.desks.filter((d) => d.id === selected) : data.desks;
   return (

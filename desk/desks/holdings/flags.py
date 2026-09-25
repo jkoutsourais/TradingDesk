@@ -125,7 +125,11 @@ def risk_flags(
         flags.append(
             RiskFlag(
                 code="concentration",
-                detail=f"{share:.0f}% of an account's net liquidation",
+                detail=(
+                    f"{share:.1f}% of an account's net liquidation (warning at "
+                    f"{config.concentration.warn_pct:g}%, "
+                    f"trim at {config.concentration.trim_pct:g}%)"
+                ),
                 forces=forced,
             )
         )

@@ -81,7 +81,7 @@ function stateLabel(state: string) {
 
 export function ThesisList() {
   const { data, error } = useApi<ThesisListRow[]>("/api/theses", KINDS);
-  if (error) return <div className="content"><div className="empty">{error}</div></div>;
+  if (error && !data) return <div className="content"><div className="empty">{error}</div></div>;
   if (!data) return <div className="content"><div className="empty">Loading</div></div>;
   return (
     <div className="content">
@@ -135,7 +135,7 @@ export function ThesisList() {
 
 export function ThesisView({ id }: { id: string }) {
   const { data, error } = useApi<ThesisDetail>(`/api/theses/${id}`, KINDS);
-  if (error) return <div className="content"><div className="empty">{error}</div></div>;
+  if (error && !data) return <div className="content"><div className="empty">{error}</div></div>;
   if (!data) return <div className="content"><div className="empty">Loading</div></div>;
   const t = data.thesis;
   const inv = t.invalidation;
