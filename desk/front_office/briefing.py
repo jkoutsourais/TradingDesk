@@ -714,7 +714,7 @@ async def push_briefing(
         if brief.status is ArtifactStatus.OK
         else (f"{config.briefing.title} (data only)")
     )
-    click = f"{config.base_url}/briefs/{brief.id}"
+    click = f"{config.base_url}/#/briefs/{brief.id}"
     message = "Tap to read."
     try:
         await ntfy.send(

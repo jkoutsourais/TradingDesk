@@ -3,6 +3,9 @@
 GET /api/status          shift state, loaded models, last runs, collector health
 GET /api/today           latest briefing, open theses, plans, vetoes, ratings
 GET /api/desks           per-desk artifacts, failures, tokens and recent jobs
+GET /api/desks/{id}      desk-specific activity (data, watch, research)
+GET /api/briefs/{id}     one briefing
+GET /api/lineage/{id}    an artifact and its ancestors, for the Trace view
 GET /api/events          server-sent events: one per new artifact
 """
 
@@ -18,7 +21,13 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy import Connection, Engine, text
 
-from desk.api.dev import _collector_rows
+from desk.api.health import (
+    collector_rows,
+    recent_failures,
+    research_dossiers,
+    volumes,
+    watch_activity,
+)
 from desk.artifacts.brief import Brief
 from desk.artifacts.store import ArtifactNotFoundError, get_artifact, get_lineage
 from desk.config import load_schedule
@@ -91,10 +100,12 @@ def _loaded_models(base_url: str) -> list[str] | None:
     return [m["name"] for m in models]
 
 
-def _brief(conn: Connection) -> dict[str, Any] | None:
-    brief_id = conn.execute(
-        text("SELECT id FROM artifacts WHERE kind = 'brief' ORDER BY created_at DESC LIMIT 1")
-    ).scalar()
+def _brief(conn: Connection, brief_id: UUID | None = None) -> dict[str, Any] | None:
+    """One brief, or the latest when no id is given."""
+    if brief_id is None:
+        brief_id = conn.execute(
+            text("SELECT id FROM artifacts WHERE kind = 'brief' ORDER BY created_at DESC LIMIT 1")
+        ).scalar()
     if brief_id is None:
         return None
     brief = get_artifact(conn, brief_id)
@@ -254,7 +265,7 @@ def api_router(engine: Engine, ollama_base_url: str) -> APIRouter:
     def status() -> dict[str, Any]:
         now = datetime.now(UTC)
         with engine.connect() as conn:
-            collectors = _collector_rows(conn, schedule, now)
+            collectors = collector_rows(conn, schedule, now)
             last_job = _rows(
                 conn,
                 "SELECT job, status, finished_at FROM job_runs WHERE finished_at IS NOT NULL "
@@ -295,8 +306,37 @@ def api_router(engine: Engine, ollama_base_url: str) -> APIRouter:
         with engine.connect() as conn:
             return {
                 "desks": _desks(conn, now),
-                "collectors": _jsonable(_collector_rows(conn, schedule, now)),
+                "collectors": _jsonable(collector_rows(conn, schedule, now)),
             }
+
+    @router.get("/desks/{desk_id}")
+    def desk_detail(desk_id: str) -> dict[str, Any]:
+        """Desk-specific activity: data volumes, watch hits and shifts, research dossiers."""
+        now = datetime.now(UTC)
+        with engine.connect() as conn:
+            if desk_id == "data":
+                return _jsonable(
+                    {
+                        "volumes": volumes(conn, now - timedelta(hours=24)),
+                        "failures": recent_failures(conn, now - timedelta(hours=6)),
+                    }
+                )
+            if desk_id == "watch":
+                return _jsonable(watch_activity(conn, now))
+            if desk_id == "research":
+                return _jsonable({"dossiers": research_dossiers(conn, now)})
+        return {}
+
+    @router.get("/briefs/{brief_id}")
+    def brief(brief_id: UUID) -> dict[str, Any]:
+        with engine.connect() as conn:
+            try:
+                found = _brief(conn, brief_id)
+            except ArtifactNotFoundError as exc:
+                raise HTTPException(status_code=404, detail=str(exc)) from exc
+        if found is None:
+            raise HTTPException(status_code=404, detail="no brief")
+        return found
 
     @router.get("/lineage/{artifact_id}")
     def lineage(artifact_id: UUID) -> list[dict[str, Any]]:

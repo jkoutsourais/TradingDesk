@@ -371,10 +371,10 @@ def test_pre_market_plans_and_sizes_pursued_theses(db_engine: Engine) -> None:
         assert decision.max_loss <= decision.cap
 
     client = TestClient(create_app(db_engine, ollama_base_url="http://127.0.0.1:9"))
-    page = client.get(f"/plans/{plan_id}")
-    assert page.status_code == 200 and "instrument_allowed" in page.text
-    trader = client.get("/dev/status").json()["trader"]
-    assert any(p["subject"] == "TSTTR" for p in trader["plans"])
+    detail = client.get(f"/api/plans/{plan_id}").json()
+    assert "instrument_allowed" in {c["name"] for c in detail["decision"]["checks"]}
+    today = client.get("/api/today").json()
+    assert any(p["subject"] == "TSTTR" for p in today["plans"] + today["vetoes"])
 
     # Planned once per verdict.
     again = asyncio.run(

@@ -13,11 +13,8 @@ from fastapi import FastAPI, HTTPException
 from sqlalchemy import Engine, text
 from sqlalchemy.exc import SQLAlchemyError
 
-from desk.api.dev import dev_router
 from desk.api.intake import intake_router
 from desk.api.lanes import lanes_router
-from desk.api.pages import pages_router
-from desk.api.scores import scores_router
 from desk.api.v1 import api_router
 from desk.api.views import views_router
 from desk.artifacts.store import ArtifactNotFoundError, get_artifact, get_lineage
@@ -58,10 +55,7 @@ def create_app(
     ollama_transport: httpx.BaseTransport | None = None,
 ) -> FastAPI:
     app = FastAPI(title="desk", version="0.1.0")
-    app.include_router(dev_router(engine))
-    app.include_router(pages_router(engine))
     app.include_router(intake_router(engine))
-    app.include_router(scores_router(engine))
     app.include_router(api_router(engine, ollama_base_url))
     app.include_router(lanes_router(engine))
     app.include_router(views_router(engine))

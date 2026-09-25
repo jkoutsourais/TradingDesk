@@ -5,6 +5,7 @@ GET  /api/theses/{id}             one thesis: versions, evidence, debates, plans
 GET  /api/plans/{id}              one plan with its risk decision
 GET  /api/book                    broker holdings, positions from fills, recent fills
 GET  /api/scores?horizon=5d       rollups plus the latest scores
+POST /api/positions/{id}/link     Jon confirms a position's plan or thesis
 POST /api/chat                    {"text", "thread_id"?, "subject_id"?}
 GET  /api/chat/threads            recent conversations
 GET  /api/chat/threads/{id}       one conversation
@@ -22,13 +23,13 @@ from desk.artifacts.analyst import AnalystView, DebateVerdict
 from desk.artifacts.chat import ChatMessage, ChatReply
 from desk.artifacts.research import Claim, VerifiedClaim
 from desk.artifacts.scoring import Position
-from desk.artifacts.store import ArtifactNotFoundError, get_artifact
+from desk.artifacts.store import ArtifactNotFoundError, append_artifact, get_artifact
 from desk.artifacts.thesis import Thesis
 from desk.artifacts.trade import RiskDecision, TradePlan
 from desk.collectors.holdings import latest_snapshots
 from desk.front_office import chat as chat_desk
 from desk.scoring.report import rollups
-from desk.scoring.run import latest_positions, load_kind, thesis_roots
+from desk.scoring.run import latest_positions, load_kind, relink, thesis_roots
 from desk.watch import queue
 
 
@@ -121,6 +122,11 @@ def _plan_detail(conn: Connection, plan: TradePlan) -> dict[str, Any]:
         "decision": _dump(decision) if isinstance(decision, RiskDecision) else None,
         "scores": _scores_for(conn, [plan.id]),
     }
+
+
+class LinkIn(BaseModel):
+    plan_id: UUID | None = None
+    thesis_id: UUID | None = None
 
 
 class ChatIn(BaseModel):
@@ -299,6 +305,16 @@ def views_router(engine: Engine) -> APIRouter:
                 h=horizon,
             )
         return report
+
+    @router.post("/positions/{position_id}/link")
+    def link(position_id: UUID, body: LinkIn) -> dict[str, Any]:
+        try:
+            with engine.begin() as conn:
+                position = relink(conn, position_id, body.plan_id, body.thesis_id)
+                append_artifact(conn, position)
+        except (ValueError, ArtifactNotFoundError) as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return {"position_id": str(position.id), "link_status": position.link_status}
 
     @router.post("/chat", status_code=201)
     def post_chat(body: ChatIn) -> dict[str, Any]:

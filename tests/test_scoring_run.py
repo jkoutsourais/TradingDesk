@@ -304,7 +304,10 @@ def test_scoring_run_end_to_end(db_engine: Engine) -> None:
     assert scores_for(db_engine, thesis.id).keys() == thesis_scores.keys()  # type: ignore[attr-defined]
 
     client = TestClient(create_app(db_engine, ollama_base_url="http://127.0.0.1:9"))
-    page = client.get("/scores?horizon=5d")
-    assert page.status_code == 200 and "By persona" in page.text
-    linked = client.post(f"/positions/{position.id}/link", json={"thesis_id": str(thesis.id)})  # type: ignore[attr-defined]
+    scored = client.get("/api/scores?horizon=5d").json()
+    assert scored["dimensions"]["persona"] and scored["recent"]
+    linked = client.post(
+        f"/api/positions/{position.id}/link",
+        json={"thesis_id": str(thesis.id)},  # type: ignore[attr-defined]
+    )
     assert linked.status_code == 200 and linked.json()["link_status"] == "confirmed"

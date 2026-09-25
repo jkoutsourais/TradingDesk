@@ -297,10 +297,12 @@ def test_pre_market_rates_holdings_and_debates_theses(db_engine: Engine) -> None
     assert verdict_id in updated.parents
 
     client = TestClient(create_app(db_engine, ollama_base_url="http://127.0.0.1:9"))
-    page = client.get(f"/debates/{verdict_id}")
-    assert page.status_code == 200 and "TSTDB won a large order." in page.text
-    analyst = client.get("/dev/status").json()["analyst"]
-    assert any(r["subject"] == "TSTHL" and r["judged"] == "buy_add" for r in analyst["ratings"])
+    detail = client.get(f"/api/theses/{thesis.id}").json()
+    debate = detail["verdicts"][0]
+    assert debate["verdict"]["id"] == str(verdict_id) and debate["views"]
+    assert any(e["statement"] == "TSTDB won a large order." for e in detail["evidence"])
+    today = client.get("/api/today").json()
+    assert any(r["subject"] == "TSTHL" and r["judged"] == "buy_add" for r in today["ratings"])
 
     # Debated and unchanged: not due again at the next shift.
     again = asyncio.run(

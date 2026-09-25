@@ -79,11 +79,11 @@ def test_intake_draft_follow_up_and_confirm(db_engine: Engine) -> None:
 
     confirmed = client.post(f"/intake/drafts/{second['draft_id']}/confirm")
     assert confirmed.status_code == 200 and confirmed.json()["state"] == "active"
-    page = client.get(f"/theses/{confirmed.json()['thesis_id']}")
-    assert page.status_code == 200
-    assert "confirmed by Jon" in page.text and "intake_message:" in page.text
-    ideas = client.get("/dev/status").json()["ideas"]
-    assert any(t["instrument"] == "TSTIN" and t["state"] == "active" for t in ideas["theses"])
+    detail = client.get(f"/api/theses/{confirmed.json()['thesis_id']}").json()
+    assert detail["versions"][-1]["change_note"] == "confirmed by Jon"
+    assert detail["thesis"]["invalidation"]["hard"]["level_ref"].startswith("intake_message:")
+    listed = client.get("/api/theses").json()
+    assert any(t["instrument"] == "TSTIN" and t["state"] == "active" for t in listed)
 
     # An invented number fails the check twice and is stored as a failed draft.
     third = client.post("/intake/messages", json={"text": "Short TSTIN2"}).json()["message_id"]

@@ -19,7 +19,7 @@ import { Chat } from "./views/Chat";
 import { Desks } from "./views/Desks";
 import { PlanView } from "./views/Plan";
 import { ThesisList, ThesisView } from "./views/Theses";
-import { Today } from "./views/Today";
+import { BriefView, Today } from "./views/Today";
 
 // Lanes and Trace carry React Flow and ECharts; loading them on demand keeps the first
 // page light on a phone.
@@ -72,6 +72,8 @@ function View({ route }: { route: string[] }) {
     case "trace":
     case "alerts":
       return <Trace id={id} />;
+    case "briefs":
+      return id && id !== "latest" ? <BriefView id={id} /> : <Today />;
     case "theses":
       return id ? <ThesisView id={id} /> : <ThesisList />;
     case "plans":

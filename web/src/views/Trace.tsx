@@ -4,6 +4,7 @@ import "@xyflow/react/dist/style.css";
 import { useEffect, useMemo, useState } from "react";
 
 import { getJson } from "../api";
+import { ExplainButton } from "../components/Explain";
 import { time } from "../format";
 
 interface Envelope {
@@ -173,6 +174,7 @@ export function Trace({ id }: { id?: string }) {
             <span className="label accent">{root.kind}</span> {root.produced_by}
             <span className="spacer" />
             <span className="muted">{time(root.created_at)}</span>
+            <ExplainButton id={root.id} />
           </div>
           {root.status === "failed" && <div className="box-body neg">{root.error}</div>}
           <Fields artifact={root} />

@@ -208,7 +208,7 @@ async def _push_urgent(
     outcome: TriageOutcome,
 ) -> None:
     config = notify.urgent
-    click = f"{notify.base_url}/alerts/{item.subject_id}"
+    click = f"{notify.base_url}/#/alerts/{item.subject_id}"
     message = "Tap to see the alert."
     with engine.connect() as conn:
         hour, day = urgent_counts(conn, now, tz)

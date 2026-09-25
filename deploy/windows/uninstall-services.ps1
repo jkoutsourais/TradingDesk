@@ -8,7 +8,7 @@ param()
 
 $ErrorActionPreference = 'Stop'
 
-$ServiceNames = @('desk-api', 'desk-collectors', 'desk-scheduler')
+$ServiceNames = @('desk-api', 'desk-collectors', 'desk-scheduler', 'desk-tunnel')
 
 $Nssm = (Get-Command nssm -ErrorAction SilentlyContinue).Source
 if (-not $Nssm) { throw 'nssm not found on PATH. Install with: winget install NSSM.NSSM' }

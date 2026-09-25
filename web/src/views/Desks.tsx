@@ -3,6 +3,7 @@ import { useState } from "react";
 import type { Desks as DesksData, DeskRow } from "../api";
 import { ago, count, duration, num, time } from "../format";
 import { useApi } from "../hooks";
+import { DeskDetail } from "./DeskDetail";
 
 function DeskJobs({ desk }: { desk: DeskRow }) {
   if (!desk.jobs.length) {
@@ -90,6 +91,7 @@ export function Desks({ selected }: { selected?: string }) {
           </table>
         </div>
       </div>
+      {selected && <DeskDetail desk={selected} />}
       {desks.map((desk) =>
         selected ? (
           <div className="box" key={desk.id}>

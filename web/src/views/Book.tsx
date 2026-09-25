@@ -44,7 +44,7 @@ function LinkForm({ positionId, onDone }: { positionId: string; onDone: () => vo
       style={{ display: "flex", gap: 4, marginTop: 4 }}
       onSubmit={(event) => {
         event.preventDefault();
-        postJson(`/positions/${positionId}/link`, { [kind]: value.trim() })
+        postJson(`/api/positions/${positionId}/link`, { [kind]: value.trim() })
           .then(onDone)
           .catch((reason: unknown) => setError(String(reason)));
       }}

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Dashboard on the Beelink: serves the built bundle and proxies API paths to the
-# workstation through the SSH reverse tunnel (127.0.0.1:18010).
+# workstation through the SSH reverse tunnel (127.0.0.1:18010, the desk-tunnel service).
 #
 # Replaces desk-dev-caddy with desk-caddy (host network, loopback only). The Cloudflare
-# tunnel container (desk-tunnel, from dev-dashboard-up.sh) is left as it is: it forwards
+# tunnel container (desk-tunnel, from cloudflare-tunnel-up.sh) is left as it is: it forwards
 # desk.hoistlaboratory.com to 127.0.0.1:8088 behind Cloudflare Access.
 #
 # Usage: ./dashboard-up.sh   (publish.ps1 copies this script and the bundle first)
@@ -18,7 +18,7 @@ cat > "$DIR/Caddyfile" <<'EOF'
 	encode gzip
 
 	# Everything the workstation API answers; the rest is the dashboard bundle.
-	@api path /api/* /intake/* /positions/* /scores /scores.json /health /artifacts/* /briefs/* /alerts/* /dossiers/* /theses/* /plans/* /debates/* /dev /dev/*
+	@api path /api/* /intake/* /health /artifacts/*
 	handle @api {
 		reverse_proxy 127.0.0.1:18010 {
 			flush_interval -1

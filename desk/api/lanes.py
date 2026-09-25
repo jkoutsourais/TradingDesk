@@ -16,7 +16,7 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException
 from sqlalchemy import Connection, Engine, text
 
-from desk.api.dev import _collector_rows
+from desk.api.health import collector_rows
 from desk.config import load_schedule
 
 STAGES = ("candidate", "promoted", "verified", "thesis", "debated", "planned", "approved", "vetoed")
@@ -224,9 +224,7 @@ def _metrics(conn: Connection, since: datetime) -> dict[str, dict[str, Any]]:
 
 def _health(conn: Connection) -> dict[str, str]:
     schedule = load_schedule()
-    states = {
-        c["collector"]: c["state"] for c in _collector_rows(conn, schedule, datetime.now(UTC))
-    }
+    states = {c["collector"]: c["state"] for c in collector_rows(conn, schedule, datetime.now(UTC))}
     order = ("failing", "stale", "disabled", "idle", "ok")
     result = {}
     for lane, sources in LANE_SOURCES.items():

@@ -1,6 +1,6 @@
 import { AlertIcon, FileIcon, LightBulbIcon, ShieldCheckIcon, ShieldXIcon } from "@primer/octicons-react";
 
-import type { PlanRow, RatingRow, ThesisRow, Today as TodayData } from "../api";
+import type { Brief, PlanRow, RatingRow, ThesisRow, Today as TodayData } from "../api";
 import { money, num, RATING, time } from "../format";
 import { useApi } from "../hooks";
 
@@ -151,37 +151,49 @@ function RatingTable({ ratings }: { ratings: RatingRow[] }) {
   );
 }
 
+export function BriefCard({ brief }: { brief: Brief | null }) {
+  return (
+    <div className="box">
+      <div className="box-header">
+        <FileIcon /> {brief ? (brief.kind === "weekend" ? "Weekend briefing" : "Morning briefing") : "Briefing"}
+        <span className="spacer" />
+        {brief && <span className="muted">{time(brief.created_at)}</span>}
+        {brief?.status === "failed" && <span className="label attention">data-only</span>}
+      </div>
+      {brief ? (
+        <div className="grid-2" style={{ gap: 0 }}>
+          {brief.sections.map((section) => (
+            <div key={section.title} style={{ borderBottom: "1px solid var(--borderColor-muted)" }}>
+              <div className="box-body" style={{ fontWeight: 600 }}>{section.title}</div>
+              <ul className="lines">
+                {section.lines.map((line, i) => (
+                  <li key={i}>{line}</li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="empty">No briefing yet.</div>
+      )}
+    </div>
+  );
+}
+
+/** A briefing a push linked to; "latest" and unknown ids fall back to Today. */
+export function BriefView({ id }: { id: string }) {
+  const { data, error } = useApi<Brief>(`/api/briefs/${id}`);
+  if (error) return <Today />;
+  return <div className="content">{data ? <BriefCard brief={data} /> : <div className="empty">Loading</div>}</div>;
+}
+
 export function Today() {
   const { data, error } = useApi<TodayData>("/api/today", KINDS);
   if (error) return <div className="content"><div className="box"><div className="empty">{error}</div></div></div>;
   if (!data) return <div className="content"><div className="empty">Loading</div></div>;
-  const { brief } = data;
   return (
     <div className="content">
-      <div className="box">
-        <div className="box-header">
-          <FileIcon /> {brief ? (brief.kind === "weekend" ? "Weekend briefing" : "Morning briefing") : "Briefing"}
-          <span className="spacer" />
-          {brief && <span className="muted">{time(brief.created_at)}</span>}
-          {brief?.status === "failed" && <span className="label attention">data-only</span>}
-        </div>
-        {brief ? (
-          <div className="grid-2" style={{ gap: 0 }}>
-            {brief.sections.map((section) => (
-              <div key={section.title} style={{ borderBottom: "1px solid var(--borderColor-muted)" }}>
-                <div className="box-body" style={{ fontWeight: 600 }}>{section.title}</div>
-                <ul className="lines">
-                  {section.lines.map((line, i) => (
-                    <li key={i}>{line}</li>
-                  ))}
-                </ul>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="empty">No briefing yet.</div>
-        )}
-      </div>
+      <BriefCard brief={data.brief} />
       <div className="box">
         <div className="box-header">
           <LightBulbIcon /> Open theses <span className="label">{data.theses.length}</span>
