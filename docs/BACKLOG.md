@@ -36,4 +36,6 @@ Items noted during the build that are out of scope for the phase in which they c
 - **Proxy duplicates in the shortlist (Phase 5).** /NG and UNG were shortlisted together on 2026-09-24. Dedupe candidates through `config/trader.yaml` future proxies.
 - **Thesis and rating wording (Phases 5-6).** The first live NRG short thesis read "pullback to the 20-day high", the XLU thesis inverted its levels twice, and the AEP rating invented a fact id. Review prompts after a week of runs.
 - **Futures margin check (Phase 7).** Futures plans only fit a funded margin account; the liquidity check warns that margin is not checked.
-- **Plan tracking against fills (Phase 8).** Plans are not linked to what Jon actually trades until fill capture exists.
+- **Fill history before 2026-09-24 (Phase 8).** The Flex query covers the last business day, so earlier executions and the positions held before the desk started have no fills. A one-off Flex query with a 365-day period would backfill them.
+- **Scoring query cost (Phase 8).** The scorekeeper loads every thesis, plan, rating and view each run. Fine at hundreds; add a scored-through marker or indexes on payload subject ids once there are thousands.
+- **Lane candidates are not scored (Phase 8).** Lane rollups come from theses. Scoring dropped candidates (no direction) would need a direction rule per lane.

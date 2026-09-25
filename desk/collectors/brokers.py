@@ -10,7 +10,7 @@ reconciled source of truth for the Roth; tastytrade balances and positions are l
 
 import asyncio
 import xml.etree.ElementTree as ET
-from datetime import UTC, date, datetime, time
+from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -18,6 +18,7 @@ from zoneinfo import ZoneInfo
 import httpx
 from tastytrade import Account
 
+from desk.artifacts.scoring import Fill
 from desk.collectors.base import (
     AccountSnapshot,
     CollectResult,
@@ -31,6 +32,8 @@ from desk.symbols import from_tastytrade
 FLEX_BASE = "https://ndcdyn.interactivebrokers.com/AccountManagement/FlexWebService"
 FLEX_POLL_INTERVAL_S = 5
 FLEX_POLL_ATTEMPTS = 24
+# tastytrade trade history fetched each run; fills already stored are skipped by ingest.
+FILL_LOOKBACK = timedelta(days=30)
 # Flex reports NAV at the close of the statement's last day.
 MARKET_CLOSE = time(16, 0)
 
@@ -140,6 +143,58 @@ def parse_flex_statement(xml_bytes: bytes, tz: ZoneInfo) -> list[AccountSnapshot
     return snapshots
 
 
+def _flex_time(value: str, tz: ZoneInfo) -> datetime:
+    """Flex dateTime, e.g. "20260924;103015" or "20260924 103015", in the statement time zone."""
+    digits = value.replace(";", " ").replace(",", " ").split()
+    day = digits[0]
+    clock = digits[1] if len(digits) > 1 else "000000"
+    return datetime(
+        int(day[:4]),
+        int(day[4:6]),
+        int(day[6:8]),
+        int(clock[:2]),
+        int(clock[2:4]),
+        int(clock[4:6]),
+        tzinfo=tz,
+    ).astimezone(UTC)
+
+
+def parse_flex_trades(xml_bytes: bytes, tz: ZoneInfo) -> list[Fill]:
+    """Executions from the Flex statement's Trades section (empty when it is not enabled)."""
+    root = ET.fromstring(xml_bytes)  # noqa: S314 - IBKR response over TLS, no external entities
+    fills = []
+    for statement in root.iter("FlexStatement"):
+        account = account_ref("ibkr", statement.get("accountId", ""))
+        for trade in statement.iter("Trade"):
+            if trade.get("levelOfDetail", "EXECUTION") != "EXECUTION":
+                continue
+            quantity = _decimal(trade.get("quantity"))
+            price = _decimal(trade.get("tradePrice"))
+            exec_id = trade.get("ibExecID") or trade.get("tradeID")
+            if not quantity or price is None or not exec_id or not trade.get("dateTime"):
+                continue
+            side = trade.get("buySell", "").upper()
+            fills.append(
+                Fill(
+                    produced_by="data.ibkr_flex",
+                    runtime_ms=0,
+                    broker="ibkr",
+                    account_ref=account,
+                    exec_id=exec_id,
+                    symbol=_ibkr_symbol(trade),
+                    contract=trade.get("description") or trade.get("symbol", ""),
+                    asset_class=IBKR_ASSET_CLASSES.get(trade.get("assetCategory", ""), "other"),
+                    side="sell" if side.startswith("SELL") or quantity < 0 else "buy",
+                    quantity=abs(quantity),
+                    price=price,
+                    multiplier=_decimal(trade.get("multiplier")) or Decimal(1),
+                    fees=abs(_decimal(trade.get("ibCommission")) or Decimal(0)),
+                    executed_at=_flex_time(trade.get("dateTime", ""), tz),
+                )
+            )
+    return fills
+
+
 class IbkrFlexPositions:
     name = "ibkr_flex"
 
@@ -173,8 +228,10 @@ class IbkrFlexPositions:
         for _ in range(FLEX_POLL_ATTEMPTS):
             statement = await self._get_xml(statement_url, reference)
             if statement.tag != "FlexStatementResponse":
+                raw = ET.tostring(statement)
                 return CollectResult(
-                    accounts=parse_flex_statement(ET.tostring(statement), self._tz)
+                    accounts=parse_flex_statement(raw, self._tz),
+                    fills=parse_flex_trades(raw, self._tz),
                 )
             # 1019: statement generation in progress. Anything else is a real failure.
             if statement.findtext("ErrorCode") != "1019":
@@ -228,6 +285,48 @@ def tastytrade_snapshot(account: Any, balances: Any, positions: list[Any]) -> Ac
     )
 
 
+def tastytrade_fills(account_number: str, transactions: list[Any]) -> list[Fill]:
+    """Trade transactions as fills; money movements and other types are skipped."""
+    fills = []
+    for tx in transactions:
+        if tx.transaction_type != "Trade" or not tx.quantity or tx.price is None:
+            continue
+        action = str(getattr(tx.action, "value", tx.action) or "")
+        instrument_type = str(getattr(tx.instrument_type, "value", tx.instrument_type))
+        fees = sum(
+            (
+                abs(Decimal(str(value)))
+                for value in (
+                    tx.commission,
+                    tx.clearing_fees,
+                    tx.regulatory_fees,
+                    tx.proprietary_index_option_fees,
+                )
+                if value is not None
+            ),
+            Decimal(0),
+        )
+        fills.append(
+            Fill(
+                produced_by="data.tastytrade",
+                runtime_ms=0,
+                broker="tastytrade",
+                account_ref=account_ref("tastytrade", account_number),
+                exec_id=str(tx.exec_id or tx.id),
+                symbol=from_tastytrade(tx.underlying_symbol or tx.symbol or ""),
+                contract=tx.symbol or "",
+                asset_class=TASTYTRADE_ASSET_CLASSES.get(instrument_type, "other"),
+                side="sell" if action.upper().startswith("SELL") else "buy",
+                quantity=abs(Decimal(str(tx.quantity))),
+                price=Decimal(str(tx.price)),
+                multiplier=Decimal(100) if "Option" in instrument_type else Decimal(1),
+                fees=fees,
+                executed_at=tx.executed_at,
+            )
+        )
+    return fills
+
+
 class TastytradePositions:
     name = "tastytrade_positions"
 
@@ -237,11 +336,16 @@ class TastytradePositions:
     async def collect(self) -> CollectResult:
         session = await self._connection.session()
         snapshots = []
+        fills: list[Fill] = []
         for account in await Account.get(session):
             balances = await account.get_balances(session)
             positions = await account.get_positions(session)
             snapshots.append(tastytrade_snapshot(account, balances, positions))
-        return CollectResult(accounts=snapshots)
+            history = await account.get_history(
+                session, type="Trade", start_date=datetime.now(UTC).date() - FILL_LOOKBACK
+            )
+            fills += tastytrade_fills(account.account_number, history)
+        return CollectResult(accounts=snapshots, fills=fills)
 
     async def aclose(self) -> None:
         return None

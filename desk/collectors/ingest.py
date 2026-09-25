@@ -89,6 +89,20 @@ def ingest(conn: Connection, result: CollectResult) -> IngestCounts:
             continue
         added += 1
 
+    fills_added = 0
+    for fill in result.fills:
+        exists = conn.execute(
+            text(
+                "SELECT 1 FROM artifacts WHERE kind = 'fill' AND payload->>'broker' = :b "
+                "AND payload->>'exec_id' = :e LIMIT 1"
+            ),
+            {"b": fill.broker, "e": fill.exec_id},
+        ).first()
+        if exists is None:
+            append_artifact(conn, fill)
+            fills_added += 1
+    added += fills_added
+
     observations_added = 0
     if result.observations:
         inserted = conn.execute(

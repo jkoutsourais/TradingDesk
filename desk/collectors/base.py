@@ -132,6 +132,8 @@ class CollectResult:
     accounts: list[AccountSnapshot] = field(default_factory=list)
     embeddings: list[RecordEmbedding] = field(default_factory=list)
     grid: list[GridObservation] = field(default_factory=list)
+    # Broker executions (Fill artifacts), deduplicated on broker and exec id by ingest.
+    fills: list[Any] = field(default_factory=list)
     # Release calendar: events plus the kinds fetched successfully this run, so upcoming
     # events of those kinds that disappeared upstream are removed.
     calendar_events: list[Any] = field(default_factory=list)

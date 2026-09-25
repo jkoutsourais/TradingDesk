@@ -10,7 +10,7 @@ Every shift starts by unloading all Ollama models (the GPU rule), then runs its 
   pre_market   triage rounds (small), then holdings ratings, thesis debates, trade plans
                and risk decisions (deep; the risk desk itself is code)
   briefing     morning brief on the deep model, pushed through ntfy
-  post_market  idea lanes, research (deep), fact-check (small), theses (deep) and
+  post_market  scoring (code), idea lanes, research (deep), fact-check (small), theses (deep) and
                thesis state checks; see desk.desks.idea.run
 """
 
@@ -52,6 +52,7 @@ from desk.front_office.notify import NotifyConfig, NtfyClient, load_notify_confi
 from desk.llm.client import OllamaChat, Usage
 from desk.llm.embeddings import OllamaEmbedder
 from desk.metrics import JobStatus, record_job_finish, record_job_start
+from desk.scoring.run import run_scoring
 from desk.settings import Settings
 from desk.symbols import is_future
 from desk.watch import queue
@@ -519,6 +520,10 @@ class Worker:
 
     async def _post_market(self, shift_id: UUID, report: RunReport) -> list[str]:
         deps = self._deps
+        # Scoring is code only and runs first, on the day's final bars.
+        scoring = await asyncio.to_thread(
+            run_scoring, self._engine, deps.calendar.tz, datetime.now(UTC)
+        )
         outcome = await run_post_market(
             self._engine,
             deps.chat,
@@ -533,7 +538,7 @@ class Worker:
             shift_id,
         )
         report.error = outcome.error
-        return outcome.notes
+        return scoring.notes + outcome.notes
 
     async def _run(self, job: queue.Job) -> RunReport:
         if job.kind == "shift":
