@@ -340,6 +340,11 @@ select {
   outline-offset: -1px;
 }
 
+.chat-layout {
+  grid-template-columns: minmax(0, 260px) minmax(0, 1fr);
+  align-items: start;
+}
+
 /* Ctrl+K palette */
 .palette-backdrop {
   position: fixed;
@@ -421,7 +426,8 @@ select {
     grid-row: 2;
   }
 
-  .grid-2 {
+  .grid-2,
+  .chat-layout {
     grid-template-columns: 1fr;
   }
 

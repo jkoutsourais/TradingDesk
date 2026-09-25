@@ -47,6 +47,8 @@ from desk.desks.trader.menu import TraderConfig, load_trader_config
 from desk.desks.trader.options import OptionSource, TastytradeOptions
 from desk.desks.trader.run import run_trader_desk
 from desk.front_office.briefing import build_briefing, push_briefing
+from desk.front_office.chat import answer_pending
+from desk.front_office.chat import pending as chat_pending
 from desk.front_office.intake import process_pending
 from desk.front_office.notify import NotifyConfig, NtfyClient, load_notify_config
 from desk.llm.client import OllamaChat, Usage
@@ -342,6 +344,8 @@ class Deps:
     trader: TraderConfig
     options: OptionSource | None
     futures: frozenset[str]
+    # Symbols the chat recognises as tickers in a question.
+    known_symbols: set[str]
     notify: NotifyConfig
     ntfy: NtfyClient | None
 
@@ -359,6 +363,9 @@ class Worker:
         self._scanner = scanner
         self._deps = deps
         self._ollama = deps.ollama_base_url
+        # Shifts, triage and chat all load chat models; the 16 GB GPU holds one at a time,
+        # so model work runs one job at a time across the workers.
+        self._gpu = asyncio.Lock()
 
     def _claim(self) -> queue.Job | None:
         with self._engine.begin() as conn:
@@ -540,9 +547,34 @@ class Worker:
         report.error = outcome.error
         return scoring.notes + outcome.notes
 
+    async def _chat(self) -> RunReport:
+        deps = self._deps
+        with self._engine.connect() as conn:
+            waiting = len(chat_pending(conn))
+        if not waiting:
+            return RunReport("no chat messages waiting")
+        # The deep model needs the GPU to itself: release whatever triage left loaded.
+        await unload_models(self._ollama)
+        answered = await answer_pending(
+            self._engine, deps.chat, deps.models.deep, deps.known_symbols, deps.calendar.tz
+        )
+        await deps.chat.unload(deps.models.deep.model)
+        return RunReport(f"chat answered {answered}")
+
     async def _run(self, job: queue.Job) -> RunReport:
+        if job.kind in ("shift", "triage", "chat"):
+            async with self._gpu:
+                return await self._run_model_job(job)
+        return await self._run_code_job(job)
+
+    async def _run_model_job(self, job: queue.Job) -> RunReport:
         if job.kind == "shift":
             return await self._run_shift(job)
+        if job.kind == "chat":
+            if await asyncio.to_thread(self._shift_running):
+                # Messages stay pending; the triage tick answers them after the shift.
+                return RunReport("waiting: a shift holds the GPU")
+            return await self._chat()
         if job.kind == "triage":
             if await asyncio.to_thread(self._shift_running):
                 return RunReport("paused: a shift holds the GPU")
@@ -557,7 +589,14 @@ class Worker:
             )
             if intake.drafted or intake.failed:
                 report.summary += f"; intake drafted {intake.drafted}, failed {intake.failed}"
+            # Chat sent during a shift, or whose job was missed, is answered here.
+            chat = await self._chat()
+            if not chat.summary.startswith("no chat"):
+                report.summary += f"; {chat.summary}"
             return report
+        raise ValueError(f"unknown model job kind {job.kind!r}")
+
+    async def _run_code_job(self, job: queue.Job) -> RunReport:
         if job.kind == "scan":
             outcome = await asyncio.to_thread(
                 self._scanner.run, job.payload, datetime.now(UTC), job.shift_id
@@ -676,6 +715,7 @@ async def run(engine: Engine, settings: Settings) -> None:
         trader=load_trader_config(),
         options=TastytradeOptions(tastytrade) if tastytrade else None,
         futures=frozenset(s for s in tiers.tier_1_symbols() if s.startswith("/")),
+        known_symbols=set(tiers.tier_1_symbols()) | set(universe.symbols),
         notify=load_notify_config(),
         ntfy=ntfy,
     )

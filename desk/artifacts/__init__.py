@@ -1,6 +1,7 @@
 # Importing each artifact module registers its kind, so rows of any kind can be loaded.
 from desk.artifacts import analyst as analyst
 from desk.artifacts import brief as brief
+from desk.artifacts import chat as chat
 from desk.artifacts import idea as idea
 from desk.artifacts import intake as intake
 from desk.artifacts import raw_record as raw_record

@@ -1,17 +1,31 @@
-import { GraphIcon, HomeIcon, ServerIcon, WorkflowIcon } from "@primer/octicons-react";
+import {
+  BriefcaseIcon,
+  CommentDiscussionIcon,
+  GraphIcon,
+  HomeIcon,
+  LightBulbIcon,
+  ServerIcon,
+  TrophyIcon,
+  WorkflowIcon,
+} from "@primer/octicons-react";
 import type { Icon } from "@primer/octicons-react";
 import { lazy, Suspense, useMemo } from "react";
 
 import { Palette, type Command } from "./components/Palette";
 import { StatusBar } from "./components/StatusBar";
 import { useHashRoute } from "./hooks";
+import { Book } from "./views/Book";
+import { Chat } from "./views/Chat";
 import { Desks } from "./views/Desks";
+import { PlanView } from "./views/Plan";
+import { ThesisList, ThesisView } from "./views/Theses";
 import { Today } from "./views/Today";
 
 // Lanes and Trace carry React Flow and ECharts; loading them on demand keeps the first
 // page light on a phone.
 const Lanes = lazy(() => import("./views/Lanes").then((m) => ({ default: m.Lanes })));
 const Trace = lazy(() => import("./views/Trace").then((m) => ({ default: m.Trace })));
+const Scores = lazy(() => import("./views/Scores").then((m) => ({ default: m.Scores })));
 
 interface Tab {
   id: string;
@@ -24,6 +38,10 @@ const TABS: Tab[] = [
   { id: "lanes", title: "Lanes", icon: WorkflowIcon },
   { id: "desks", title: "Desks", icon: ServerIcon },
   { id: "trace", title: "Trace", icon: GraphIcon },
+  { id: "theses", title: "Theses", icon: LightBulbIcon },
+  { id: "book", title: "Book", icon: BriefcaseIcon },
+  { id: "scores", title: "Scores", icon: TrophyIcon },
+  { id: "chat", title: "Chat", icon: CommentDiscussionIcon },
 ];
 
 const DESKS: [string, string][] = [
@@ -52,11 +70,18 @@ function View({ route }: { route: string[] }) {
     case "lanes":
       return <Lanes />;
     case "trace":
-    case "theses":
-    case "plans":
-    case "briefs":
     case "alerts":
       return <Trace id={id} />;
+    case "theses":
+      return id ? <ThesisView id={id} /> : <ThesisList />;
+    case "plans":
+      return id ? <PlanView id={id} /> : <Today />;
+    case "book":
+      return <Book />;
+    case "scores":
+      return <Scores />;
+    case "chat":
+      return <Chat threadId={id} />;
     default:
       return <Today />;
   }
