@@ -1,13 +1,17 @@
-import { GraphIcon, HomeIcon, ServerIcon } from "@primer/octicons-react";
+import { GraphIcon, HomeIcon, ServerIcon, WorkflowIcon } from "@primer/octicons-react";
 import type { Icon } from "@primer/octicons-react";
-import { useMemo } from "react";
+import { lazy, Suspense, useMemo } from "react";
 
 import { Palette, type Command } from "./components/Palette";
 import { StatusBar } from "./components/StatusBar";
 import { useHashRoute } from "./hooks";
 import { Desks } from "./views/Desks";
 import { Today } from "./views/Today";
-import { Trace } from "./views/Trace";
+
+// Lanes and Trace carry React Flow and ECharts; loading them on demand keeps the first
+// page light on a phone.
+const Lanes = lazy(() => import("./views/Lanes").then((m) => ({ default: m.Lanes })));
+const Trace = lazy(() => import("./views/Trace").then((m) => ({ default: m.Trace })));
 
 interface Tab {
   id: string;
@@ -17,6 +21,7 @@ interface Tab {
 
 const TABS: Tab[] = [
   { id: "today", title: "Today", icon: HomeIcon },
+  { id: "lanes", title: "Lanes", icon: WorkflowIcon },
   { id: "desks", title: "Desks", icon: ServerIcon },
   { id: "trace", title: "Trace", icon: GraphIcon },
 ];
@@ -44,6 +49,8 @@ function View({ route }: { route: string[] }) {
   switch (view) {
     case "desks":
       return <Desks selected={id} />;
+    case "lanes":
+      return <Lanes />;
     case "trace":
     case "theses":
     case "plans":
@@ -93,7 +100,9 @@ export function App() {
             Ctrl+K
           </a>
         </div>
-        <View route={route} />
+        <Suspense fallback={<div className="content"><div className="empty">Loading</div></div>}>
+          <View route={route} />
+        </Suspense>
       </main>
       <StatusBar />
       <Palette commands={commands} />

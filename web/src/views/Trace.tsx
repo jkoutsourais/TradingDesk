@@ -1,5 +1,7 @@
 import { GitCommitIcon } from "@primer/octicons-react";
-import { useEffect, useState } from "react";
+import { Background, type Edge, Handle, type Node, Position, ReactFlow } from "@xyflow/react";
+import "@xyflow/react/dist/style.css";
+import { useEffect, useMemo, useState } from "react";
 
 import { getJson } from "../api";
 import { time } from "../format";
@@ -64,6 +66,74 @@ function Fields({ artifact }: { artifact: Envelope }) {
   );
 }
 
+const GRAPH_COL = 230;
+const GRAPH_ROW = 64;
+const GRAPH_MAX_PER_DEPTH = 12;
+
+function GraphNode({ data }: { data: Envelope }) {
+  return (
+    <a
+      href={`#/trace/${data.id}`}
+      title={summarize(data)}
+      style={{
+        display: "block",
+        width: GRAPH_COL - 40,
+        padding: "4px 8px",
+        border: `1px solid ${data.status === "failed" ? "var(--borderColor-danger-emphasis)" : "var(--borderColor-default)"}`,
+        borderRadius: 6,
+        background: "var(--bgColor-default)",
+        color: "var(--fgColor-default)",
+        textDecoration: "none",
+        fontSize: 12,
+      }}
+    >
+      <div>
+        <b>{data.kind}</b> <span className="muted">{data.produced_by}</span>
+      </div>
+      <div style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{summarize(data) || "-"}</div>
+      <Handle type="target" position={Position.Right} style={{ opacity: 0 }} isConnectable={false} />
+      <Handle type="source" position={Position.Left} style={{ opacity: 0 }} isConnectable={false} />
+    </a>
+  );
+}
+
+const graphTypes = { artifact: GraphNode };
+
+/** Root on the right, ancestors to the left by depth; edges run from parent to child. */
+function lineageGraph(entries: LineageEntry[]): { nodes: Node[]; edges: Edge[]; height: number } {
+  const byDepth = new Map<number, Envelope[]>();
+  for (const { depth, artifact } of entries) {
+    const list = byDepth.get(depth) ?? [];
+    if (list.length < GRAPH_MAX_PER_DEPTH) list.push(artifact);
+    byDepth.set(depth, list);
+  }
+  const maxDepth = Math.max(...byDepth.keys());
+  const shown = new Set<string>();
+  const nodes: Node[] = [];
+  let tallest = 1;
+  for (const [depth, artifacts] of byDepth) {
+    tallest = Math.max(tallest, artifacts.length);
+    artifacts.forEach((artifact, i) => {
+      shown.add(artifact.id);
+      nodes.push({
+        id: artifact.id,
+        type: "artifact",
+        position: { x: (maxDepth - depth) * GRAPH_COL, y: i * GRAPH_ROW },
+        data: artifact as unknown as Record<string, unknown>,
+        draggable: false,
+      });
+    });
+  }
+  const edges: Edge[] = [];
+  for (const { artifact } of entries) {
+    if (!shown.has(artifact.id)) continue;
+    for (const parent of artifact.parents) {
+      if (shown.has(parent)) edges.push({ id: `${parent}-${artifact.id}`, source: parent, target: artifact.id });
+    }
+  }
+  return { nodes, edges, height: tallest * GRAPH_ROW + 40 };
+}
+
 export function Trace({ id }: { id?: string }) {
   const [lineage, setLineage] = useState<LineageEntry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -81,6 +151,7 @@ export function Trace({ id }: { id?: string }) {
   }, [id]);
 
   const root = lineage?.find((e) => e.depth === 0)?.artifact;
+  const graph = useMemo(() => (lineage && lineage.length > 1 ? lineageGraph(lineage) : null), [lineage]);
   return (
     <div className="content">
       <form
@@ -105,6 +176,16 @@ export function Trace({ id }: { id?: string }) {
           </div>
           {root.status === "failed" && <div className="box-body neg">{root.error}</div>}
           <Fields artifact={root} />
+        </div>
+      )}
+      {graph && (
+        <div className="box">
+          <div className="box-header">Lineage graph</div>
+          <div style={{ height: Math.min(graph.height, 700) }}>
+            <ReactFlow nodes={graph.nodes} edges={graph.edges} nodeTypes={graphTypes} fitView nodesConnectable={false} panOnScroll zoomOnScroll={false} minZoom={0.2}>
+              <Background color="var(--borderColor-muted)" />
+            </ReactFlow>
+          </div>
         </div>
       )}
       {lineage && lineage.length > 1 && (

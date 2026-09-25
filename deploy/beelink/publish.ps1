@@ -22,9 +22,10 @@ try {
 }
 
 $dist = Join-Path $web "dist"
-ssh $HostName "mkdir -p ~/desk/incoming && rm -rf ~/desk/incoming/*"
+ssh $HostName "mkdir -p ~/desk && rm -rf ~/desk/incoming"
 if ($LASTEXITCODE -ne 0) { throw "ssh to $HostName failed" }
-scp -r -q "$dist\*" "${HostName}:~/desk/incoming/"
+# Copies the folder itself (no wildcard), so it works the same from any shell.
+scp -r -q "$dist" "${HostName}:~/desk/incoming"
 if ($LASTEXITCODE -ne 0) { throw "copying the bundle failed" }
 scp -q (Join-Path $PSScriptRoot "dashboard-up.sh") "${HostName}:~/desk/dashboard-up.sh"
 if ($LASTEXITCODE -ne 0) { throw "copying dashboard-up.sh failed" }

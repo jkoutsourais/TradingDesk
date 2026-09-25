@@ -15,6 +15,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from desk.api.dev import dev_router
 from desk.api.intake import intake_router
+from desk.api.lanes import lanes_router
 from desk.api.pages import pages_router
 from desk.api.scores import scores_router
 from desk.api.v1 import api_router
@@ -61,6 +62,7 @@ def create_app(
     app.include_router(intake_router(engine))
     app.include_router(scores_router(engine))
     app.include_router(api_router(engine, ollama_base_url))
+    app.include_router(lanes_router(engine))
 
     @app.get("/health")
     def health() -> dict[str, Any]:
