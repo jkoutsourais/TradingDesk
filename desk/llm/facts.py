@@ -14,6 +14,8 @@ from decimal import Decimal
 
 PLACEHOLDER = re.compile(r"\{([A-Za-z0-9_.:/^\-]+)\}")
 NUMBER = re.compile(r"\d+(?:[.,]\d+)*")
+# Fact ids with a numeric part, e.g. claim_3, lvl_12, th_1_hard.
+BARE_ID = re.compile(r"\b[a-z]+_\d+[a-z0-9_]*\b")
 
 
 # Typographic characters models emit that render badly in consoles and plain-text pushes:
@@ -76,6 +78,12 @@ class FactTable:
             f"unknown fact {{{fid}}}" for fid in PLACEHOLDER.findall(text) if fid not in self._facts
         ]
         prose = PLACEHOLDER.sub(" ", text)
+        # Ids written without braces ("claim_3") are references, not prose; their digits
+        # can slip past the number check when a label happens to contain them.
+        for token in BARE_ID.findall(prose):
+            if token in self._facts:
+                problems.append(f"write {{{token}}} with braces, or describe it in words")
+        prose = BARE_ID.sub(" ", prose)
         for number in NUMBER.findall(prose):
             if number not in self._label_numbers:
                 problems.append(

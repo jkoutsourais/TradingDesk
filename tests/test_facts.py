@@ -95,3 +95,16 @@ def test_render_normalizes_typographic_hyphens_and_spaces() -> None:
 
     table = FactTable([])
     assert table.render("20" + chr(0x2011) + "day" + chr(0x202F) + "range") == "20-day range"
+
+
+def test_bare_fact_ids_are_rejected() -> None:
+    from desk.llm.facts import Fact, FactTable
+
+    table = FactTable(
+        [
+            Fact("claim_3", "s", "", "Orders rose.", "verified claim", "vc:1"),
+            Fact("lvl_2", 1, "USD", "$1.00", "X last close plus 3 ATR", "levels:x"),
+        ]
+    )
+    assert any("{claim_3}" in p for p in table.violations("Grounded in the break (claim_3)."))
+    assert table.violations("Grounded in the break {claim_3}.") == []
